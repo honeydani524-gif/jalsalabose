@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useStore } from "../store/AppStore";
+import { amountAtBaseCurrency } from "../domain/finance";
 import { Badge, Bars, Btn, Card, CardTitle, Chip, Donut, Empty, Icon, Money, Row, Segmented, Spark } from "../ui/kit";
 import {
   fmtAmount,
@@ -34,6 +35,9 @@ export function AnalysisScreen() {
   const [period, setPeriod] = useState<Period>("3m");
   const from = fromOf(period);
   const s = data.settings;
+  const txBase = (t: (typeof data.transactions)[number]) => amountAtBaseCurrency(
+    t.amount, t.currency, t.fxRate, t.date, s.base, data.exchangeRates, s.rates,
+  );
 
   const history = useMemo(
     () => data.nwHistory.filter((p) => p.t >= from).map((p) => (p.value / (s.rates[p.base] ?? 1)) * (s.rates[s.base] ?? 1)),
@@ -41,8 +45,8 @@ export function AnalysisScreen() {
   );
 
   const txs = useMemo(() => data.transactions.filter((t) => t.date >= from), [data.transactions, from]);
-  const income = sum(txs.filter((t) => t.type === "income").map((t) => t.amountBase));
-  const expense = sum(txs.filter((t) => t.type === "expense").map((t) => t.amountBase));
+  const income = sum(txs.filter((t) => t.type === "income").map((t) => txBase(t)));
+  const expense = sum(txs.filter((t) => t.type === "expense").map((t) => txBase(t)));
 
   const monthBars = useMemo(() => {
     const out: { label: string; a: number; b: number }[] = [];
@@ -54,8 +58,8 @@ export function AnalysisScreen() {
       const list = txs.filter((t) => monthKey(t.date) === k);
       out.push({
         label: `${d.getMonth() + 1}월`,
-        a: sum(list.filter((t) => t.type === "income").map((t) => t.amountBase)),
-        b: sum(list.filter((t) => t.type === "expense").map((t) => t.amountBase)),
+        a: sum(list.filter((t) => t.type === "income").map((t) => txBase(t))),
+        b: sum(list.filter((t) => t.type === "expense").map((t) => txBase(t))),
       });
     }
     return out;
@@ -67,7 +71,7 @@ export function AnalysisScreen() {
     return Object.entries(g)
       .map(([id, list]) => ({
         label: data.categories.find((c) => c.id === id)?.name ?? "기타",
-        value: sum(list.map((t) => t.amountBase)),
+        value: sum(list.map((t) => txBase(t))),
       }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 6);
@@ -138,7 +142,7 @@ export function AnalysisScreen() {
     return Object.entries(g)
       .map(([ids, list]) => ({
         label: ids.split(",").map((id) => `#${data.tags.find((t) => t.id === id)?.name ?? ""}`).join(" "),
-        value: sum(list.map((t) => t.amountBase)),
+        value: sum(list.map((t) => txBase(t))),
       }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 5);
@@ -393,13 +397,13 @@ export function AIScreen() {
 
     if (picked.includes("cashflow")) {
       const txs = data.transactions.filter((t) => t.date >= from);
-      const inc = sum(txs.filter((t) => t.type === "income").map((t) => t.amountBase));
-      const exp = sum(txs.filter((t) => t.type === "expense").map((t) => t.amountBase));
+      const inc = sum(txs.filter((t) => t.type === "income").map((t) => txBase(t)));
+      const exp = sum(txs.filter((t) => t.type === "expense").map((t) => txBase(t)));
       L.push(`## 2. 수입 · 지출`);
       L.push(`- 수입 ${fmt(inc)} (${txs.filter((t) => t.type === "income").length}건) / 지출 ${fmt(exp)} (${txs.filter((t) => t.type === "expense").length}건) / 잡금 ${fmt(inc - exp)}`);
       const g = groupBy(txs.filter((t) => t.type === "expense" && t.categoryId), (t) => t.categoryId!);
       const rows = Object.entries(g)
-        .map(([id, list]) => ({ n: data.categories.find((c) => c.id === id)?.name ?? "기타", v: sum(list.map((t) => t.amountBase)) }))
+        .map(([id, list]) => ({ n: data.categories.find((c) => c.id === id)?.name ?? "기타", v: sum(list.map((t) => txBase(t))) }))
         .sort((a, b) => b.v - a.v);
       if (rows.length) L.push(`- 지출 카테고리: ${rows.map((r) => `${r.n} ${fmt(r.v)}`).join(", ")}`);
       else L.push(`- 지출 카테고리: 데이터 부족`);
