@@ -637,8 +637,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!acc) throw new Error("계좌를 찾을 수 없습니다.");
       if (input.endBalance < 0 || input.deposit < 0 || input.withdrawal < 0)
         throw new Error("잔액과 입출금은 음수일 수 없습니다.");
-      if ((input.deposit > 0 || input.withdrawal > 0) && !input.fromId)
-        throw new Error("입출금 자금이 이동할 계좌 또는 현금을 선택하세요.");
       if (input.fromId && input.fromKind === undefined)
         throw new Error("자금 이동 자산 유형을 확인할 수 없습니다.");
       if (input.fromId && input.fromKind === "account" && input.fromId === input.accountId)
