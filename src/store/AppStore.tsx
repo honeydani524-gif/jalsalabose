@@ -563,7 +563,17 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     async (patch: Partial<Settings>) => {
       const d = ref.current;
       if (!d) return;
-      const row = { ...d.settings, ...patch, id: "settings" } as Settings & { id: string };
+      const mergedRates = patch.rates
+        ? { ...d.settings.rates, ...patch.rates }
+        : d.settings.rates;
+      if (patch.base !== undefined && !["USD", "KRW", "KHR"].includes(patch.base))
+        throw new Error("지원하지 않는 기준 통화입니다.");
+      Object.entries(mergedRates).forEach(([currency, rate]) => {
+        if (!["USD", "KRW", "KHR"].includes(currency) ||
+            typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0)
+          throw new Error(`${currency} 환율은 지원 통화의 0보다 큰 숫자여야 합니다.`);
+      });
+      const row = { ...d.settings, ...patch, rates: mergedRates, id: "settings" } as Settings & { id: string };
       const next: Data = { ...d, settings: row };
       const persist: Persist = [["kv", row]];
       if (patch.rates) {
@@ -1381,8 +1391,37 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         ...(settingsRow ?? {}),
         rates: { ...DEFAULT_SETTINGS.rates, ...(isRecord(rawRates) ? rawRates : {}) },
       } as Settings;
-      if (typeof settings.base !== "string" || !settings.base.trim())
-        throw new Error("기준 통화 설정이 올바르지 않습니다.");
+      if (!["USD", "KRW", "KHR"].includes(settings.base))
+        throw new Error("지원하지 않는 기준 통화입니다.");
+      const supportedCurrencies = new Set(["USD", "KRW", "KHR"]);
+      const currencyFields: Partial<Record<StoreName, string[]>> = {
+        accounts: ["currency"],
+        cashLocations: ["currency"],
+        transactions: ["currency"],
+        exchangeRates: ["base"],
+        propAccounts: ["feeCurrency", "payoutCurrency"],
+        propPayouts: ["currency"],
+        cryptoPrices: ["currency"],
+        casinoSessions: ["currency"],
+        casinoBuyIns: ["currency"],
+        casinoCashOuts: ["currency"],
+      };
+      for (const store of STORE_LIST) {
+        for (const row of normalized[store]) {
+          for (const field of currencyFields[store] ?? []) {
+            const currency = (row as Record<string, unknown>)[field];
+            if (typeof currency === "string" && !supportedCurrencies.has(currency))
+              throw new Error(`${store} ${row.id} 항목의 통화 ${currency}는 지원하지 않습니다.`);
+          }
+          if (store === "casinoCashOuts") {
+            const legs = (row as Record<string, unknown>).legs;
+            if (Array.isArray(legs)) for (const leg of legs) {
+              if (isRecord(leg) && typeof leg.currency === "string" && !supportedCurrencies.has(leg.currency))
+                throw new Error(`casinoCashOuts ${row.id}의 도착 통화가 지원되지 않습니다.`);
+            }
+          }
+        }
+      }
       Object.entries(settings.rates).forEach(([currency, rate]) => {
         if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0)
           throw new Error(`${currency} 환율 설정이 올바르지 않습니다.`);
