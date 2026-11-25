@@ -63,7 +63,7 @@ export function AnalysisScreen() {
       });
     }
     return out;
-  }, [txs, period]);
+  }, [txs, period, data.exchangeRates, s.base, s.rates]);
 
   const catRows = useMemo(() => {
     const exp = txs.filter((t) => t.type === "expense" && t.categoryId);
@@ -75,7 +75,7 @@ export function AnalysisScreen() {
       }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 6);
-  }, [txs, data.categories]);
+  }, [txs, data.categories, data.exchangeRates, s.base, s.rates]);
 
   const composition = useMemo(() => {
     const g = groupBy(nw.rows.filter((r) => r.included), (r) => r.group);
@@ -146,7 +146,7 @@ export function AnalysisScreen() {
       }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 5);
-  }, [txs, data.tags]);
+  }, [txs, data.tags, data.exchangeRates, s.base, s.rates]);
 
   return (
     <div className="space-y-4">
