@@ -728,12 +728,12 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           assertBalance(next, fromKind, input.fromId, sourceAmount);
           const tx: Tx = {
             id: uid(), type: "transfer", amount: sourceAmount, currency: sourceCurrency,
-            fxRate: sourceFx, amountBase: round((sourceAmount / sourceFx) * baseFx, 6),
+            fxRate: sourceFx, amountBase: round((sourceAmount / sourceFx) * baseFx, 6), baseCurrency: d.settings.base,
             date: txDate, from: { kind: fromKind, id: input.fromId },
             legs: [{
               kind: "account", id: input.accountId, amount: round(input.deposit, 6),
               currency: acc.currency, fxRate: investmentFx,
-              amountBase: round((input.deposit / investmentFx) * baseFx, 6),
+              amountBase: round((input.deposit / investmentFx) * baseFx, 6), baseCurrency: d.settings.base,
             }],
             tagIds: [], memo: `${input.date} 투자 입금`, snapshotId: snap.id, createdAt: Date.now(),
           };
@@ -746,12 +746,12 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           const destinationAmount = round(convertAtRates(input.withdrawal, investmentFx, sourceFx), 6);
           const tx: Tx = {
             id: uid(), type: "transfer", amount: round(input.withdrawal, 6), currency: acc.currency,
-            fxRate: investmentFx, amountBase: round((input.withdrawal / investmentFx) * baseFx, 6),
+            fxRate: investmentFx, amountBase: round((input.withdrawal / investmentFx) * baseFx, 6), baseCurrency: d.settings.base,
             date: txDate, from: { kind: "account", id: input.accountId },
             legs: [{
               kind: fromKind, id: input.fromId, amount: destinationAmount,
               currency: sourceCurrency, fxRate: sourceFx,
-              amountBase: round((destinationAmount / sourceFx) * baseFx, 6),
+              amountBase: round((destinationAmount / sourceFx) * baseFx, 6), baseCurrency: d.settings.base,
             }],
             tagIds: [], memo: `${input.date} 투자 출금`, snapshotId: snap.id, createdAt: Date.now(),
           };
