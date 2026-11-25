@@ -643,13 +643,9 @@ export function BuyInForm({
 
         <RelSelect label="출발 자산" value={from} onChange={setFrom} allowCrypto />
         {from?.kind === "crypto" && (
-          <Field label="전송 코인" hint="네트워크 수수료는 아래에 별도 입력">
-            <Select value={symbol} onChange={(e) => setSymbol(e.target.value)}>
-              {["USDT", "USDC", "BTC", "ETH", "SOL"].map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </Select>
-          </Field>
+          <p className="rounded-xl bg-[#f6f8fa] px-3 py-2.5 text-[12.5px] leading-relaxed text-muted">
+            암호화폐 출발 자산은 현재 거래 시점 코인 가격 이력이 없어 USDT만 지원합니다. 입력 금액은 USD/USDT 기준이며 네트워크 수수료는 아래에 별도 입력합니다.
+          </p>
         )}
         <Field label="금액" required>
           <NumInput value={amount} onChange={setAmount} currency={currency} autoFocus />
