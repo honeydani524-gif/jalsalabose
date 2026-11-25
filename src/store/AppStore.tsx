@@ -23,6 +23,8 @@ import {
   delRow,
   putRow,
   putRows,
+  putBatch,
+  replaceAll,
   STORE_LIST,
   uid,
   type StoreName,
@@ -305,12 +307,28 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const ref = useRef<Data | null>(null);
   const histLock = useRef(false);
 
-  const commit = useCallback((next: Data, persist: Persist = []) => {
-    ref.current = next;
-    setData(next);
-    persist.forEach(([store, row]) => {
-      if (row) putRow(store, row).catch((e) => setError(String(e?.message ?? e)));
-    });
+  const commit = useCallback(async (next: Data, persist: Persist = []) => {
+    const previous = ref.current;
+    const writes: [StoreName, { id: string }][] = persist.flatMap(([store, row]) =>
+      row ? [[store, row] as [StoreName, { id: string }]] : [],
+    );
+    const oldPoint = previous?.nwHistory[previous.nwHistory.length - 1];
+    const newPoint = next.nwHistory[next.nwHistory.length - 1];
+    if (
+      newPoint &&
+      (!oldPoint || newPoint.id !== oldPoint.id || newPoint.t !== oldPoint.t ||
+        newPoint.value !== oldPoint.value || newPoint.base !== oldPoint.base)
+    ) writes.push(["nwHistory", newPoint]);
+
+    try {
+      await putBatch(writes);
+      ref.current = next;
+      setData(next);
+      setError(null);
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e));
+      throw e;
+    }
   }, []);
 
   /* ── 순자산 이력 기록 (같은 날은 마지막 값만 갱신) ── */
@@ -332,7 +350,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       pts.push({ id: uid(), t: now, value: nw.total, base: d.settings.base });
     }
     const next = { ...d, nwHistory: pts };
-    putRow("nwHistory", pts[pts.length - 1]).catch(() => undefined);
     return next;
   }, []);
 
@@ -402,7 +419,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!d) return;
       const list = (d as unknown as Record<StoreName, { id: string }[]>)[store] ?? [];
       const next = { ...d, [store]: upsert(list, row) } as Data;
-      commit(recordHistory(next), [[store, row]]);
+      await commit(recordHistory(next), [[store, row]]);
     },
     [commit, recordHistory],
   );
@@ -413,8 +430,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!d) return;
       const list = (d as unknown as Record<StoreName, { id: string }[]>)[store] ?? [];
       const next = { ...d, [store]: list.filter((r) => r.id !== id) } as Data;
-      commit(recordHistory(next));
-      delRow(store, id).catch(() => undefined);
+      await delRow(store, id);
+      await commit(recordHistory(next));
     },
     [commit, recordHistory],
   );
@@ -425,7 +442,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!d) return;
       const row = { ...d.settings, ...patch, id: "settings" } as Settings & { id: string };
       const next = { ...d, settings: row } as Data;
-      commit(next, [["kv", row]]);
+      await commit(next, [["kv", row]]);
     },
     [commit],
   );
@@ -586,7 +603,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         next = bumpRel(next, input.from.kind, input.from.id, -input.amount, pers);
       }
 
-      commit(recordHistory(next), pers);
+      await commit(recordHistory(next), pers);
     },
     [commit, recordHistory],
   );
@@ -616,7 +633,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const pers: Persist = [["transactions", tx]];
       let next2: Data = { ...d, transactions: [...d.transactions, tx] };
       next2 = bumpRel(next2, kind, id, delta, pers);
-      commit(recordHistory(next2), pers);
+      await commit(recordHistory(next2), pers);
     },
     [commit, recordHistory],
   );
@@ -970,7 +987,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         ...d,
         casinoSessions: d.casinoSessions.map((s) => (s.id === id ? row : s)),
       } as Data;
-      commit(recordHistory(next), [["casinoSessions", row]]);
+      await commit(recordHistory(next), [["casinoSessions", row]]);
       return { ok: true };
     },
     [commit, recordHistory],
@@ -1267,7 +1284,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     };
     await clearStore("nwHistory"); // 기존 이력과 섞이지 않도록 초기화
     const withHist = recordHistory({ ...next, nwHistory: [] });
-    commit(withHist);
+    await commit(withHist);
     STORE_LIST.forEach((s) => {
       const rows = (withHist as unknown as Record<string, { id: string }[]>)[s];
       if (Array.isArray(rows) && rows.length) putRows(s, rows).catch(() => undefined);
