@@ -540,7 +540,7 @@ export function BuyInForm({
   const [amount, setAmount] = useState<number | "">("");
   const [chip, setChip] = useState<number | "">("");
   const [fee, setFee] = useState<number | "">(0);
-  const [symbol, setSymbol] = useState("USDT");
+  const symbol = "USDT";
   const [dt, setDt] = useState(() => {
     const d = new Date();
     return `${dayKey(Date.now())}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
