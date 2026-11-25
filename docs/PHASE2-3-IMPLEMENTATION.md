@@ -80,3 +80,7 @@ The workflow must pass on the final branch head before this phase is considered 
 - Crypto-funded casino Buy-ins are restricted to USDT until token-quantity valuation can be recorded with a transaction-time market price. The USD amount must not be subtracted as BTC/ETH/SOL units.
 - Prop payout accounting uses the historical payout-date FX rate and credits the payout net of the USD-denominated fee.
 - The workflow verifies tests, TypeScript, the production web bundle, and an Android debug APK. A physical Android device test and persistent release signing remain manual release checks.
+
+- Snapshot edits now persist balance reversals for every previously linked source/destination asset, including when the source is changed or removed.
+- Backup import rejects missing store arrays or a missing/duplicate settings row before replacing the database.
+- Exchange-rate history rows and the current settings are committed in one multi-store IndexedDB transaction.
