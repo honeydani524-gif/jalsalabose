@@ -4,12 +4,16 @@ import { useQuick } from "../ui/quick";
 import { Btn, Card, Empty, Icon, Modal, Money, Row, Segmented, Select, Input } from "../ui/kit";
 import { fmtAmount, fmtDate, groupBy, sum } from "../domain/calc";
 import type { Tx } from "../domain/entities";
+import { amountAtBaseCurrency } from "../domain/finance";
 
 type Range = "month" | "last" | "quarter" | "all";
 type Kind = "all" | "income" | "expense" | "transfer";
 
 export default function TxScreen() {
-  const { data, remove } = useStore();
+  const { data, removeTransaction } = useStore();
+  const txBase = (t: Tx) => amountAtBaseCurrency(
+    t.amount, t.currency, t.fxRate, t.date, data.settings.base, data.exchangeRates, data.settings.rates, t.amountBase, t.baseCurrency,
+  );
   const quick = useQuick();
   const [range, setRange] = useState<Range>("month");
   const [kind, setKind] = useState<Kind>("all");
@@ -17,6 +21,7 @@ export default function TxScreen() {
   const [tag, setTag] = useState("");
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<Tx | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const list = useMemo(() => {
     const now = new Date();
@@ -42,8 +47,8 @@ export default function TxScreen() {
     return rows.sort((a, b) => b.date - a.date);
   }, [data.transactions, range, kind, cat, tag, q]);
 
-  const income = sum(list.filter((t) => t.type === "income").map((t) => t.amountBase));
-  const expense = sum(list.filter((t) => t.type === "expense").map((t) => t.amountBase));
+  const income = sum(list.filter((t) => t.type === "income").map((t) => txBase(t)));
+  const expense = sum(list.filter((t) => t.type === "expense").map((t) => txBase(t)));
   const byDay = groupBy(list, (t) => fmtDate(t.date));
 
   const ranges: { value: Range; label: string }[] = [
@@ -158,8 +163,8 @@ export default function TxScreen() {
         />
       ) : (
         Object.entries(byDay).map(([day, rows]) => {
-          const dayIn = sum(rows.filter((t) => t.type === "income").map((t) => t.amountBase));
-          const dayEx = sum(rows.filter((t) => t.type === "expense").map((t) => t.amountBase));
+          const dayIn = sum(rows.filter((t) => t.type === "income").map((t) => txBase(t)));
+          const dayEx = sum(rows.filter((t) => t.type === "expense").map((t) => txBase(t)));
           return (
             <Card key={day} pad={false} className="overflow-hidden p-4 md:p-5">
               <div className="mb-1 flex items-center justify-between px-1">
@@ -215,8 +220,13 @@ export default function TxScreen() {
                 variant="danger"
                 full
                 onClick={async () => {
-                  await remove("transactions", open.id);
-                  setOpen(null);
+                  try {
+                    await removeTransaction(open.id);
+                    setOpen(null);
+                    setActionError(null);
+                  } catch (e) {
+                    setActionError((e as Error).message);
+                  }
                 }}
               >
                 삭제
@@ -228,13 +238,14 @@ export default function TxScreen() {
           }
         >
           <div className="space-y-3">
+            {actionError && <p className="rounded-xl bg-[#fdeceb] px-3 py-2.5 text-[13px] text-stamp">{actionError}</p>}
             <div className="rounded-2xl bg-[#f6f8fa] px-4 py-4 text-center">
               <p className="font-mono text-[11.5px] uppercase tracking-wider text-muted">{nameOf(open)}</p>
               <p className="mt-1 font-serif text-[30px] font-black text-ink tnum">
                 <Money v={open.amount} settings={data.settings} cur={open.currency} />
               </p>
               <p className="mt-1.5 font-mono text-[12.5px] text-muted">
-                기준 통화 환산 <Money v={open.amountBase} settings={data.settings} /> · 적용 환율{" "}
+                기준 통화 환산 <Money v={txBase(open)} settings={data.settings} /> · 적용 환율{" "}
                 {open.fxRate.toLocaleString("ko-KR")}
               </p>
             </div>
@@ -265,14 +276,14 @@ export default function TxScreen() {
                   return (
                     <div key={i} className="flex justify-between py-1 text-[14px]">
                       <span>{name ?? "삭제된 자산"}</span>
-                      <span className="font-mono tnum">{fmtAmount(l.amount, open.currency)}</span>
+                      <span className="font-mono tnum">{fmtAmount(l.amount, l.currency ?? open.currency)}</span>
                     </div>
                   );
                 })}
               </div>
             )}
             <p className="font-mono text-[11.5px] text-muted">
-              원본 통화 {open.currency} · 당시 환율 {open.fxRate} · 기준 통화 {data.settings.base} 환산 {fmtAmount(open.amountBase, data.settings.base)}
+              원본 통화 {open.currency} · 당시 환율 {open.fxRate} · 기준 통화 {data.settings.base} 환산 {fmtAmount(txBase(open), data.settings.base)}
               <br />
               이후 환율을 바꿔도 이 값은 변하지 않습니다.
             </p>

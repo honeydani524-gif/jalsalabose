@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useStore } from "../store/AppStore";
+import { amountAtBaseCurrency } from "../domain/finance";
 import { useQuick } from "../ui/quick";
 import { Badge, Btn, Card, CardTitle, Donut, Empty, Icon, Money, Row, Spark, Bars } from "../ui/kit";
 import {
@@ -12,28 +13,30 @@ import {
   monthKey,
   monthLabel,
   pctChange,
-  rateOf,
-  sum,
+    sum,
 } from "../domain/calc";
 
 export default function HomeScreen() {
   const { data, nw } = useStore();
   const quick = useQuick();
   const s = data.settings;
+  const txBase = (t: (typeof data.transactions)[number]) => amountAtBaseCurrency(
+    t.amount, t.currency, t.fxRate, t.date, s.base, data.exchangeRates, s.rates, t.amountBase, t.baseCurrency,
+  );
 
   const history = useMemo(
     () =>
       data.nwHistory.map((p) => ({
         ...p,
-        v: (p.value / rateOf(s, p.base)) * rateOf(s, s.base),
+        v: amountAtBaseCurrency(p.value, p.base, 1, p.t, s.base, data.exchangeRates, s.rates, p.value, p.base),
       })),
-    [data.nwHistory, s],
+    [data.nwHistory, data.exchangeRates, s],
   );
 
   const thisMonth = monthKey(Date.now());
   const monthTx = data.transactions.filter((t) => monthKey(t.date) === thisMonth);
-  const income = sum(monthTx.filter((t) => t.type === "income").map((t) => t.amountBase));
-  const expense = sum(monthTx.filter((t) => t.type === "expense").map((t) => t.amountBase));
+  const income = sum(monthTx.filter((t) => t.type === "income").map((t) => txBase(t)));
+  const expense = sum(monthTx.filter((t) => t.type === "expense").map((t) => txBase(t)));
 
   const months = useMemo(() => {
     const out: { label: string; a: number; b: number }[] = [];
@@ -44,12 +47,12 @@ export default function HomeScreen() {
       const list = data.transactions.filter((t) => monthKey(t.date) === k);
       out.push({
         label: `${d.getMonth() + 1}월`,
-        a: sum(list.filter((t) => t.type === "income").map((t) => t.amountBase)),
-        b: sum(list.filter((t) => t.type === "expense").map((t) => t.amountBase)),
+        a: sum(list.filter((t) => t.type === "income").map((t) => txBase(t))),
+        b: sum(list.filter((t) => t.type === "expense").map((t) => txBase(t))),
       });
     }
     return out;
-  }, [data.transactions]);
+  }, [data.transactions, data.exchangeRates, s.base, s.rates]);
 
   const recent = [...data.transactions].sort((a, b) => b.date - a.date).slice(0, 8);
 
@@ -63,8 +66,8 @@ export default function HomeScreen() {
     const prev = data.nwHistory.filter((p) => p.t < todayStart.getTime());
     if (prev.length === 0) return null;
     const p = prev[prev.length - 1];
-    return (nw.total - p.value / rateOf(s, p.base) * rateOf(s, s.base));
-  }, [data.nwHistory, nw.total, s]);
+    return nw.total - amountAtBaseCurrency(p.value, p.base, 1, p.t, s.base, data.exchangeRates, s.rates, p.value, p.base);
+  }, [data.nwHistory, data.exchangeRates, nw.total, s]);
 
   /* 자산 요약 */
   const cashWallet = sum(

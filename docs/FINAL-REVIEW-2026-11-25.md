@@ -1,0 +1,88 @@
+# Final Review Report — 2026-11-25
+
+- Repository: `honeydani524-gif/jalsalabose`
+- Working branch: `fix/phase-2-financial-corrections`
+- Pull request: [#1](https://github.com/honeydani524-gif/jalsalabose/pull/1)
+- Base branch: `audit/phase-1-baseline`
+- `main` remains unchanged at the baseline commit.
+- APK creation is intentionally manual and was not part of the latest verification runs.
+
+## Findings corrected
+
+| Area | Finding | Correction |
+|---|---|---|
+| Casino crypto Buy-in | USD-denominated value could be debited as if it were BTC/ETH/SOL token quantity. | Restrict the current USD 1:1 debit path to USDT until historical token-price snapshots are implemented. |
+| Casino session currency | A later Buy-in entered with an earlier date could be mistaken for the first Buy-in by date-sorted totals. | Use the persisted session currency and FX rate for totals, cash-out validation, and open-chip calculations; add a backdated-entry regression test. |
+| Prop payouts | USD-denominated fees were not deducted from credited payouts and FX could use current rather than receipt-time rates. | Convert the fee at the payout-date rate, credit the net amount, persist historical FX, and link payout rows to their generated transactions. |
+| Investment snapshot editing | Reversing old snapshot flows could update source balances in memory without persisting them. | Persist every reversed source/destination balance in the same transaction. |
+| Transaction deletion | Deleting a ledger row removed only the transaction record, leaving cached asset balances unchanged. | Reverse the transaction's native-currency balance effects and delete the row atomically; protect snapshot-generated rows and safely unlink new prop payouts. |
+| Base-currency changes | Historical transaction `amountBase` values could be summed as though they used the newly selected display currency. | Convert stored transaction-time base snapshots into the current display base using the historical FX table; fall back to each transaction's stored FX for legacy rows. |
+| Backup restore | Missing store arrays or malformed values could risk destructive replacement. | Validate required stores, IDs, financial fields, settings, and casino legs before one atomic replacement. |
+| IndexedDB writes | A synchronous object-store write exception could leave earlier queued writes eligible to commit; overlapping UI mutations could calculate from the same stale in-memory state. | Abort the whole transaction on synchronous errors in batch and replace operations; reject overlapping state commits rather than silently overwriting a newer balance. |
+| Exchange-rate settings | Rate-history rows and settings could be persisted separately. | Save settings and all new rate-history rows in one multi-store transaction. |
+| Backup export | Immediate object-URL cleanup and mobile sharing could cause unreliable exports. | Prefer native file sharing when available and defer URL cleanup for download fallback. |
+| Android instrumentation test | The sample test expected the wrong application ID. | Align the assertion with `com.jalsalabose.app`. |
+| CI permissions | The workflow previously had write access and generated-file auto-commit behavior. | Keep repository permissions read-only and do not auto-commit generated files. |
+| APK workflow | Routine code review previously generated a debug APK. | Keep push/PR checks to tests, type checking, and web build; gate APK packaging behind manual `workflow_dispatch` input. |
+| GitHub PR target | PR #1 targeted `main` instead of the intended audit baseline. | Retarget PR #1 to `audit/phase-1-baseline`; `main` was not modified. |
+| Documentation and metadata | README and package-lock metadata were stale; the npm package still had the Vite template name. | Align package-lock root version, rename the npm package to `jalsalabose`, and refresh README/build/QA instructions. |
+| GitHub Actions runtime | Older action major versions emitted Node 20 deprecation warnings on current runners. | Upgrade checkout/setup-node/setup-java/upload-artifact to current major releases; pin Android setup-android to v4.0.4. |
+| Signing artifact hygiene | Additional signing formats and generated APK/AAB files could be accidentally committed. | Ignore JKS, keystore, P12, PFX, PEM, KEY, keystore properties, APK, and AAB files. |
+
+## Latest automated verification
+
+The latest code, including whole-database replacement locking, missing-FX rejection, supported-currency validation, backup metadata count correction, and finite input guards, passed verification at commit `b335994fc4a6d2336171dd758a00a1077fbb3326`.
+
+- GitHub Actions verification run: [45615459998](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45615459998)
+- `npm ci`: passed
+- Financial regression tests: passed
+- TypeScript check: passed
+- Vite production build: passed
+- Android APK job: skipped by design; no APK artifact was created by these runs
+
+The tests cover transaction-time FX display across base-currency changes, backdated casino Buy-ins, balance reversals for deleted transactions, external prop payout reversal, and crypto wallet native-USD versus selected-base valuation. This automated verification does not certify Android installation or physical-device behavior.
+
+### Historical artifact note
+
+Before APK packaging was gated behind manual dispatch, an earlier workflow run [45592746439](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45592746439) created debug artifact `jalsalabose-android-debug` (artifact ID `15012096309`). It was not downloaded or distributed and is not a release candidate; it expires on 2026-12-09. Current push/PR runs skip APK packaging.
+
+## Remaining checks before release
+
+1. Perform physical Android testing: first launch, persistence after restart, orientation/process recreation, and update installation.
+2. Test JSON export/import on Android and verify balances, transactions, settings, and historical FX.
+3. Perform failure-injection testing for IndexedDB restore and confirm that the old database remains intact after an aborted transaction.
+4. Configure a persistent release keystore in GitHub Actions secrets before distributing upgrades that must install over an existing app.
+5. Manually trigger the APK workflow only when the user is ready to create an APK.
+
+## Operating notes
+
+- Data remains local to each device in WebView IndexedDB. There is no account, server, or cloud sync.
+- Android automatic backup is disabled. Users must export an in-app JSON backup before reinstalling or changing phones.
+- Casino crypto Buy-in currently supports USDT only.
+- The repository is public and has no standard LICENSE file; source visibility and reuse rights should be considered separately.
+- PR #1 remains open and draft. Do not merge into `main` without explicit approval.
+
+
+## Follow-up integrity review
+
+A second pass found that asset deletion guards were incomplete: some screens checked only transaction source/account fields and did not cover transfer destination legs or related investment, prop, and casino records. The store now rejects deletion whenever a record references the account, cash location, crypto wallet, prop account, or casino. The UI surfaces the rejection rather than silently removing linked data.
+
+Additional physical QA: attempt to delete an account referenced only as a transfer destination; a cash location referenced by a casino Cash-out; a crypto wallet referenced by crypto assets, crypto transactions, or casino flows; a prop account with payout history; and a casino with session history. Every deletion must be blocked without changing data.
+
+
+The follow-up review also corrected the crypto wallet detail amount so its USD-native value is no longer mislabeled when the selected base currency is KRW/KHR. Prop payout totals in the analysis screen and generated AI analysis context now use the net amount after the stored USD-denominated fee is converted at the payout's historical FX rate.
+
+
+A commit-level overlap guard was added so two rapid state mutations cannot both persist balance values derived from the same stale in-memory snapshot. A conflicting second commit is rejected with a retry message instead of silently overwriting the first result.
+
+
+## Third-pass financial and persistence review
+
+- JSON export now reports the settings store count as one (the settings row is synthesized from `Data.settings`, not stored as `Data.kv`).
+- Restore rejects unsupported currency codes in financial rows and settings instead of accepting data that the UI cannot value correctly.
+- Partial settings-rate updates merge with existing rates; unsupported currencies, non-positive/non-finite rates, and a USD rate other than 1 are rejected.
+- Historical FX lookup now throws when neither a transaction-date rate nor a valid configured fallback exists. It no longer silently assumes an unknown currency is equal to USD.
+- Whole-database restore, reset, and sample-data replacement share the same in-process write lock as ordinary commits. The in-memory state is published only after the atomic IndexedDB replacement succeeds.
+- Financial entry points now reject non-finite amounts/dates for transactions, balance edits, investment snapshots, casino Buy-ins/Cash-outs, and prop payouts before writing records.
+
+Latest automated run [45615459998](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45615459998) passed financial regression tests, TypeScript, and production web build. Android APK packaging was skipped by design. These checks do not replace Android device testing or IndexedDB failure-injection tests.

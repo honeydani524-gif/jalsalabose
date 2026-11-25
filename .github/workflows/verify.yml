@@ -1,11 +1,18 @@
-name: Baseline verification
+name: Verify app and optionally build Android APK
 
 on:
   push:
     branches:
       - "audit/**"
+      - "fix/**"
   pull_request:
   workflow_dispatch:
+    inputs:
+      build_apk:
+        description: "Build and upload a debug APK (normally leave disabled during code review)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -15,15 +22,70 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
+
       - name: Install dependencies
         run: npm ci
+
+      - name: Financial regression tests
+        run: npm test
+
       - name: TypeScript check
         run: npx tsc --noEmit
-      - name: Production build
+
+      - name: Production web build
         run: npm run build
+
+  android-apk:
+    # Build APK automatically when the dedicated testing branch is updated; keep manual dispatch support too.
+    if: (github.event_name == 'workflow_dispatch' && inputs.build_apk == true) || (github.event_name == 'push' && github.ref == 'refs/heads/fix/phase-2-financial-corrections')
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Production web build
+        run: npm run build
+
+      - name: Setup Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4.0.4
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Sync Capacitor Android project
+        run: npx cap sync android
+
+      - name: Build debug APK
+        run: cd android && ./gradlew assembleDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: jalsalabose-android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14

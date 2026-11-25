@@ -2,18 +2,21 @@ import { useMemo, useState } from "react";
 import { useStore } from "../store/AppStore";
 import { BuyInForm } from "./forms";
 import { Badge, Btn, Card, Empty, Field, Icon, Input, Modal, Money, Row, Segmented, Select, Textarea } from "../ui/kit";
-import { fmtAmount, fmtDate, fmtDateTime, round, toBase } from "../domain/calc";
+import { fmtAmount, fmtDate, fmtDateTime, round } from "../domain/calc";
+import { rateAt as historicalRateAt, toSessionCurrency } from "../domain/finance";
 import { uid } from "../data/db";
-import type { RelKind } from "../domain/entities";
+import { casinoSessionTotals, type RelKind } from "../domain/entities";
+import { amountAtBaseCurrency } from "../domain/finance";
 
 /* ── Cash-out (분할 수령) ────────────────────────────── */
 function CashOutForm({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
   const { data, addCashOut } = useStore();
   const ses = data.casinoSessions.find((s) => s.id === sessionId);
   const bi = data.casinoBuyIns.filter((b) => b.sessionId === sessionId);
-  const co = data.casinoCashOuts.filter((c) => c.sessionId === sessionId);
   const currency = ses?.currency ?? "USD";
-  const bought = round(bi.reduce((s, b) => s + b.amount, 0) - co.reduce((s, c) => s + c.totalAmount, 0), 6);
+  const sessionTotals = casinoSessionTotals(sessionId, data.casinoBuyIns, data.casinoCashOuts, ses);
+  const bought = sessionTotals.open;
+  const sessionFxRate = ses?.fxRate ?? bi[0]?.fxRate ?? 1;
 
   const [total, setTotal] = useState<number | "">(bought > 0 ? bought : "");
   const [fee, setFee] = useState<number | "">(0);
@@ -28,7 +31,22 @@ function CashOutForm({ sessionId, onClose }: { sessionId: string; onClose: () =>
   const [memo, setMemo] = useState("");
   const [err, setErr] = useState<string | null>(null);
 
-  const sumLegs = round(legs.reduce((s, l) => s + (Number(l.amount) || 0), 0), 6);
+  const transactionTime = new Date(dt).getTime();
+  const rateAt = (cur: string) =>
+    historicalRateAt(cur, transactionTime, data.exchangeRates, data.settings.rates);
+  const legCurrency = (leg: (typeof legs)[number]) =>
+    leg.kind === "crypto"
+      ? "USD"
+      : leg.kind === "account"
+        ? data.accounts.find((a) => a.id === leg.id)?.currency ?? "USD"
+        : data.cashLocations.find((a) => a.id === leg.id)?.currency ?? "USD";
+  const sumLegs = round(
+    legs.reduce((sum, leg) => {
+      const cur = legCurrency(leg);
+      return sum + toSessionCurrency(Number(leg.amount) || 0, rateAt(cur), sessionFxRate);
+    }, 0),
+    6,
+  );
   const net = (Number(total) || 0) - (Number(fee) || 0);
   const diff = round(net - sumLegs, 6);
 
@@ -40,7 +58,7 @@ function CashOutForm({ sessionId, onClose }: { sessionId: string; onClose: () =>
     try {
       if (!total || total <= 0) throw new Error("Cash-out 금액을 입력하세요.");
       if (legs.some((l) => !l.id)) throw new Error("도착지를 모두 선택하세요.");
-      if (Math.abs(diff) > 1e-6) throw new Error(`도착 합계가 실수령액과 다릅니다. (차이 ${diff})`);
+      if (Math.abs(diff) > 0.01) throw new Error(`환산 후 도착 합계가 실수령액과 다릅니다. (차이 ${fmtAmount(diff, currency)})`);
       await addCashOut({
         sessionId,
         totalAmount: Number(total),
@@ -72,7 +90,7 @@ function CashOutForm({ sessionId, onClose }: { sessionId: string; onClose: () =>
       <div className="space-y-3.5">
         {err && <p className="rounded-xl bg-[#fdeceb] px-3 py-2.5 text-[13.5px] text-stamp">{err}</p>}
         <div className="rounded-xl bg-[#f6f8fa] px-3.5 py-3 font-mono text-[12.5px] leading-relaxed text-ink/75">
-          미정산 칩 {fmtAmount(bought, currency)} · 세션 총 Buy-in {fmtAmount(bi.reduce((s, b) => s + b.amount, 0), currency)}
+          미정산 칩 {fmtAmount(bought, currency)} · 세션 총 Buy-in {fmtAmount(sessionTotals.buyIn, currency)}
         </div>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Cash-out 총액" required>
@@ -106,11 +124,14 @@ function CashOutForm({ sessionId, onClose }: { sessionId: string; onClose: () =>
                       ? data.cashLocations.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)
                       : data.cryptoWallets.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
                 </Select>
-                <input
-                  type="number" inputMode="decimal" value={l.amount || ""} placeholder="0"
-                  onChange={(e) => setLeg(i, { amount: Number(e.target.value) || 0 })}
-                  className="w-[104px] shrink-0 rounded-xl border border-rule px-2.5 py-2 text-right font-mono text-[14px] tnum outline-none focus:border-brand"
-                />
+                <div className="w-[116px] shrink-0">
+                  <input
+                    type="number" inputMode="decimal" value={l.amount || ""} placeholder="0"
+                    onChange={(e) => setLeg(i, { amount: Number(e.target.value) || 0 })}
+                    className="w-full rounded-xl border border-rule px-2.5 py-2 text-right font-mono text-[14px] tnum outline-none focus:border-brand"
+                  />
+                  <p className="mt-0.5 text-right font-mono text-[10px] text-muted">{legCurrency(l)}</p>
+                </div>
                 {legs.length > 1 && (
                   <button onClick={() => setLegs(legs.filter((_, j) => j !== i))} aria-label="삭제" className="cursor-pointer px-1 text-muted hover:text-stamp">✕</button>
                 )}
@@ -118,9 +139,9 @@ function CashOutForm({ sessionId, onClose }: { sessionId: string; onClose: () =>
             ))}
           </div>
           <div className="mt-2.5 flex justify-between border-t border-rule pt-2 font-mono text-[12.5px]">
-            <span className="text-muted">실수령 {fmtAmount(net, currency)} / 도착 합계 {fmtAmount(sumLegs, currency)}</span>
+            <span className="text-muted">실수령 {fmtAmount(net, currency)} / 환산 도착 합계 {fmtAmount(sumLegs, currency)}</span>
             <span className={Math.abs(diff) < 1e-6 ? "font-bold text-pos" : "font-bold text-stamp"}>
-              {Math.abs(diff) < 1e-6 ? "일치 ✓" : `차이 ${diff}`}
+              {Math.abs(diff) < 0.01 ? "환산 일치 ✓" : `차이 ${fmtAmount(diff, currency)}`}
             </span>
           </div>
         </div>
@@ -150,10 +171,12 @@ function SessionDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const casino = data.casinos.find((c) => c.id === ses.casinoId);
   const bi = data.casinoBuyIns.filter((b) => b.sessionId === id).sort((a, b) => a.date - b.date);
   const co = data.casinoCashOuts.filter((c) => c.sessionId === id).sort((a, b) => a.date - b.date);
-  const totalIn = bi.reduce((s, b) => s + b.amount, 0);
-  const totalOut = co.reduce((s, c) => s + c.totalAmount, 0);
+  const sessionTotals = casinoSessionTotals(id, data.casinoBuyIns, data.casinoCashOuts, ses);
+  const totalIn = sessionTotals.buyIn;
+  const totalOut = sessionTotals.cashOut;
   const pnl = round(totalOut - totalIn, 6);
-  const open = round(totalIn - totalOut, 6);
+  const open = sessionTotals.open;
+  const sessionFxRate = ses.fxRate ?? bi[0]?.fxRate ?? 1;
   const ongoing = ses.status === "ongoing";
   const currency = ses.currency;
 
@@ -219,8 +242,16 @@ function SessionDetail({ id, onClose }: { id: string; onClose: () => void }) {
 
         <div>
           <p className="mb-1.5 font-mono text-[11.5px] uppercase tracking-wider text-muted">거래 흐름</p>
-          {[...bi.map((b) => ({ k: "in" as const, d: b.date, amt: b.amount, from: relName(b.from.kind, b.from.id), memo: b.memo })),
-            ...co.map((c) => ({ k: "out" as const, d: c.date, amt: c.totalAmount, from: c.legs.map((l) => relName(l.kind, l.id)).join(" + "), memo: c.memo }))]
+          {[...bi.map((b) => ({
+              k: "in" as const, d: b.date,
+              amt: b.sessionAmount ?? toSessionCurrency(b.amount + (b.fee || 0), b.fxRate || sessionFxRate, sessionFxRate),
+              from: relName(b.from.kind, b.from.id), memo: b.memo,
+            })),
+            ...co.map((x) => ({
+              k: "out" as const, d: x.date,
+              amt: x.sessionAmount ?? toSessionCurrency(x.totalAmount - (x.fee || 0), x.fxRate || sessionFxRate, sessionFxRate),
+              from: x.legs.map((l) => relName(l.kind, l.id)).join(" + "), memo: x.memo,
+            }))]
             .sort((a, b) => b.d - a.d)
             .map((x, i) => (
               <Row
@@ -321,8 +352,14 @@ export default function CasinoScreen() {
         const ids = new Set(sessions.map((s) => s.id));
         const ins = data.casinoBuyIns.filter((b) => ids.has(b.sessionId));
         const outs = data.casinoCashOuts.filter((o) => ids.has(o.sessionId));
-        const totalIn = ins.reduce((s, b) => s + toBase(b.amount, b.currency, data.settings), 0);
-        const totalOut = outs.reduce((s, o) => s + toBase(o.totalAmount, o.currency, data.settings), 0);
+        const totalIn = ins.reduce((sum, b) => sum + amountAtBaseCurrency(
+          b.amount + (b.fee || 0), b.currency, b.fxRate, b.date,
+          data.settings.base, data.exchangeRates, data.settings.rates,
+        ), 0);
+        const totalOut = outs.reduce((sum, o) => sum + amountAtBaseCurrency(
+          o.totalAmount - (o.fee || 0), o.currency, o.fxRate, o.date,
+          data.settings.base, data.exchangeRates, data.settings.rates,
+        ), 0);
         return {
           c,
           visits: sessions.length,
@@ -332,7 +369,7 @@ export default function CasinoScreen() {
           pnl: round(totalOut - totalIn, 6),
         };
       }),
-    [data.casinos, data.casinoSessions, data.casinoBuyIns, data.casinoCashOuts, data.settings],
+    [data.casinos, data.casinoSessions, data.casinoBuyIns, data.casinoCashOuts, data.exchangeRates, data.settings],
   );
 
   const ongoingSessions = data.casinoSessions.filter((s) => s.status === "ongoing");
@@ -364,8 +401,9 @@ export default function CasinoScreen() {
           </p>
           <div className="grid gap-2 sm:grid-cols-2">
             {ongoingSessions.map((s) => {
-              const bi = data.casinoBuyIns.filter((b) => b.sessionId === s.id).reduce((a, b) => a + b.amount, 0);
-              const co = data.casinoCashOuts.filter((c) => c.sessionId === s.id).reduce((a, c) => a + c.totalAmount, 0);
+              const totals = casinoSessionTotals(s.id, data.casinoBuyIns, data.casinoCashOuts, s);
+              const bi = totals.buyIn;
+              const co = totals.cashOut;
               return (
                 <button key={s.id} onClick={() => setDetail(s.id)} className="cursor-pointer rounded-xl border border-warn/40 bg-white px-3.5 py-3 text-left transition hover:border-warn">
                   <p className="text-[14.5px] font-bold text-ink">{data.casinos.find((c) => c.id === s.casinoId)?.name}</p>
@@ -473,8 +511,9 @@ export default function CasinoScreen() {
           ) : (
             <Card pad={false} className="overflow-hidden p-4 md:p-5">
               {[...data.casinoSessions].sort((a, b) => b.startedAt - a.startedAt).map((s) => {
-                const bi = data.casinoBuyIns.filter((b) => b.sessionId === s.id).reduce((a, b) => a + b.amount, 0);
-                const co = data.casinoCashOuts.filter((c) => c.sessionId === s.id).reduce((a, c) => a + c.totalAmount, 0);
+                const totals = casinoSessionTotals(s.id, data.casinoBuyIns, data.casinoCashOuts, s);
+                const bi = totals.buyIn;
+                const co = totals.cashOut;
                 return (
                   <Row
                     key={s.id}

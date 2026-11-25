@@ -1,257 +1,149 @@
 # 잘살아보세 (JalSalAboSe)
 
-한국 · 캄보디아 · 미국 등 여러 국가에 흩어진 **은행 계좌, 지갑 현금, 금고, 증권사, 해외선물 브로커, 프랍 트레이딩 계정, 암호화폐 지갑, 카지노 자금, 수입과 지출**을 한곳에서 관리하는 개인용 통합 자산관리 앱입니다.
+한국 · 캄보디아 · 미국 등 여러 국가의 은행 계좌, 현금·금고, 증권·해외선물 계정, 프랍 계정, 암호화폐 지갑, 카지노 자금과 수입·지출을 관리하는 개인용 자산관리 앱입니다.
 
-- **기준 통화**: USD / KRW / KHR (설정에서 변경)
+- **기준 통화**: USD / KRW / KHR
 - **기준 시간대**: Asia/Phnom_Penh
-- **데이터 저장**: 브라우저 로컬 IndexedDB (서버 전송 없음 · 오프라인 동작)
-- **백업**: JSON 내보내기 / 복원
-- **플랫폼**: 웹 우선 → Android APK (Capacitor)
+- **저장 방식**: 기기 내부 WebView/브라우저 IndexedDB
+- **동기화**: 서버·계정·클라우드 동기화 없음
+- **백업**: 앱 내부 JSON 내보내기 / 복원
+- **Android**: Capacitor 8 프로젝트 포함
 
-> 상용 서비스가 아닌 **개인이 매일 쓰는 실용 앱**을 목표로 합니다. 모든 계산은 브라우저 안에서 동작하며, 외부 서버로 데이터를 보내지 않습니다.
+사용자 금융 데이터는 외부 서버로 전송하지 않습니다. 코인 시세 자동 갱신을 사용할 때는 시세 제공 API에 코인 심볼을 요청할 수 있습니다. 오프라인에서는 저장된 시세와 수동 입력을 사용할 수 있습니다.
 
 ---
 
-## 1. 핵심 원칙 (이 앱의 존재 이유)
+## 1. 핵심 원칙
 
 | 원칙 | 설명 |
-| --- | --- |
-| **소유한 것만 센다** | 프랍 명목 계정($100,000), 미지급 수익, 카지노 진행 중 칩은 **순자산에서 제외**하고 별도 지표로만 표시합니다. |
-| **한 곳에서만 계산** | `src/domain/` 의 순수 함수가 홈·분석·AI 프롬프트의 모든 합계를 만듭니다. 화면(UI)은 계산하지 않습니다. |
-| **과거는 절대 바뀌지 않는다** | 거래는 `원본 통화 · 당시 환율(fxRate) · 기준 통화 환산액(amountBase)` 4개를 한 세트로 저장합니다. 환율을 바꿔도 과거 거래는 그대로입니다. |
-| **내부 이체는 수입/지출이 아니다** | 계좌 이체, 현금 인출 분할, Buy-in은 `transfer` 타입으로 기록되어 **총자산 변화 = 0** (Buy-in은 칩이 자산이 아니므로 감소가 정확합니다). |
-| **시세는 수량을 건드리지 않는다** | 코인 시세 동기화는 `cryptoPrices` 스토어만 씁니다. 보유 수량·거래 기록은 변경하지 않습니다. |
-
----
+|---|---|
+| 소유한 자산만 순자산에 포함 | 프랍 명목 금액, 미수령 수익, 카지노 진행 중 칩은 순자산에서 제외 |
+| 과거 거래의 환율 보존 | 거래 시점 환율과 기준 통화 환산액을 저장하며 현재 환율 변경으로 과거 거래를 재계산하지 않음 |
+| 내부 이체와 수입·지출 분리 | 계좌·현금 간 이동은 이체로 기록 |
+| 시세와 보유 수량 분리 | 시세 갱신은 가격 데이터만 변경하고 보유 수량은 변경하지 않음 |
+| 로컬 데이터 우선 | 앱 데이터는 각 기기에 별도로 저장하며 다른 기기와 자동 공유하지 않음 |
 
 ## 2. 주요 기능
 
-- **홈** — 전체 순자산(최상단), 시작 대비 증감, 자산 추이 그래프, 자산 요약 5종, 별도 관리 지표(프랍·진행 중 칩), 월간 수입/지출, 자산 구성 도넛, 최근 거래
-- **자산** — 계좌(국가 → 금융기관 그룹핑, 검색, 유형 필터, 즐겨찾기, 잔액 상세·수정 이력), 현금/금고, 암호화폐 지갑·보유량·시세 동기화, 프랍 계정
-- **거래 내역** — 기간/유형/카테고리/태그/검색 필터, 날짜별 묶음, 상세 보기, 삭제
-- **투자** — 일일 평가잔액 스냅샷, **매매손익 자동 분리**(입출금 제외), 누적 손익·수익률, 그래프
-- **카지노** — 카지노 목록, 세션(첫 Buy-in으로 자동 생성), 다중 Buy-in, **분할 Cash-out**, 미정산 확인 후 세션 종료, 세션 손익
-- **분석** — 기간별 자산 추이·구성·국가별·수입/지출·지출 카테고리·태그·투자·프랍·카지노
-- **AI 분석** — 실제 데이터로 **분석 프롬프트 자동 생성**(9종 분석, 기간 선택, 데이터 선택, 민감정보 마스킹, 전체 복사). 외부 API 호출 없음.
-- **설정** — 기준 통화, 환율(전후 비교 + 이력), 시세 동기화, 마스터 데이터(국가·금융기관·계좌 유형·카테고리·태그), 백업/복원/초기화, 앱 정보
+- **홈·순자산** — 계좌, 현금, 투자, 암호화폐를 기준 통화로 합산
+- **자산 관리** — 국가·금융기관별 계좌, 현금·금고, 암호화폐 지갑
+- **거래** — 수입·지출·다중 통화 이체 및 거래 내역
+- **투자** — 일일 평가잔액, 입출금 분리, 매매손익
+- **프랍** — 프랍 계정과 실제 지급 수익 관리
+- **카지노** — 세션, 다중 Buy-in, 분할 Cash-out, 미정산 칩과 손익
+- **분석** — 자산 추이, 구성, 수입·지출 및 투자·프랍·카지노 분석
+- **AI 분석 보조** — 사용자가 선택한 데이터를 바탕으로 분석 프롬프트 생성; 외부 AI API 자동 호출 없음
+- **설정** — 기준 통화, 환율 이력, 마스터 데이터, 백업·복원·초기화
 
----
-
-## 3. 설치와 실행
+## 3. 개발 환경
 
 ### 요구사항
 
-- Node.js **18.18 이상** (권장 20 LTS)
-- npm 9 이상
-- Chrome 110+ / Safari 16.4+ / Firefox 115+ (IndexedDB 필수)
+- **Node.js 22**
+- npm 10 이상 권장
+- IndexedDB를 지원하는 최신 Chrome, Edge, Safari 또는 Firefox
 
-### 명령어
+Capacitor 8 CLI가 Node.js 22 이상을 요구하므로 Node 18/20 환경은 Android 작업에 사용하지 마세요.
+
+### 실행
 
 ```bash
-# 1) 저장소 클론
-git clone https://github.com/<사용자명>/jalsalabose.git
+git clone https://github.com/honeydani524-gif/jalsalabose.git
 cd jalsalabose
-
-# 2) 의존성 설치
-npm install
-
-# 3) 개발 서버 실행 → http://localhost:5173
+npm ci
 npm run dev
-
-# 4) 프로덕션 빌드 → dist/
-npm run build
-
-# 5) 빌드 결과 로컬 확인
-npm run preview
 ```
 
-### 환경변수 (선택)
-
-환경변수가 없어도 앱은 완전히 동작합니다. (`env.example` 참고)
-
-| 변수 | 기본값 | 설명 |
-| --- | --- | --- |
-| `VITE_APP_VERSION` | `0.1.0` | 앱 표시 버전 |
-| `VITE_SCHEMA_VERSION` | `1` | DB 스키마 버전 (마이그레이션과 일치해야 함) |
-| `VITE_PRICE_API` | CoinGecko | 코인 시세 API 주소 (미설정 시 수동 시세) |
+### 확인 명령어
 
 ```bash
-cp env.example .env.local
+npm test
+npx tsc --noEmit
+npm run build
 ```
 
----
+Vitest 회귀 테스트는 `npm test`로 실행합니다. 현재 Playwright E2E 및 ESLint 스크립트는 구성되어 있지 않습니다.
 
 ## 4. 프로젝트 구조
 
 ```
-jalsalabose/
-├─ public/                  # 공개 정적 파일
-├─ src/
-│  ├─ App.tsx               # 셸 · 해시 라우터 · 사이드바/하단탭 · 빠른 입력
-│  ├─ main.tsx
-│  ├─ index.css             # 디자인 토큰 (@theme) · 스펙 표 스타일
-│  ├─ assets/               # 이미지 (번들 인라인)
-│  ├─ data/
-│  │  └─ db.ts              # IndexedDB 래퍼 · 스토어 목록 · 스키마 버전
-│  ├─ domain/               # L3 순수 계산 (UI/DB 미의존)
-│  │  ├─ calc.ts            # 환율 · 금액 포맷 · 날짜 · 매매손익 공식
-│  │  └─ entities.ts        # 엔티티 타입 + computeNetWorth()
-│  ├─ store/
-│  │  └─ AppStore.tsx       # L2 상태 + 유스케이스 + 씨드 데이터
-│  ├─ screens/              # 화면
-│  │  ├─ Home.tsx  Assets.tsx  Tx.tsx  Invest.tsx
-│  │  ├─ Casino.tsx  Analysis.tsx  Settings.tsx
-│  │  └─ forms.tsx          # 빠른 입력 폼 (수입·지출·이체·스냅샷·Buy-in·프랍 지급)
-│  ├─ ui/
-│  │  ├─ kit.tsx            # 버튼·카드·시트·차트·금액 표시 컴포넌트
-│  │  └─ quick.tsx          # 빠른 입력 컨텍스트
-│  ├─ sections/             # 설계 문서 (앱 안의 #/spec 페이지)
-│  └─ components/ui.tsx     # 문서 공통 컴포넌트
-├─ docs/DESIGN.md           # 설계 요약 (GitHub/GPT 작업용)
-├─ env.example              # 환경변수 템플릿
-└─ README.md
-# capacitor.config.ts 는 12단계에서 생성합니다.
+src/
+  data/db.ts             IndexedDB 스키마와 트랜잭션 래퍼
+  domain/                순수 계산 함수와 엔티티
+  store/AppStore.tsx     상태, 금융 유스케이스, 백업·복원
+  screens/               앱 화면과 입력 폼
+  ui/                    공통 UI 컴포넌트
+android/                 Capacitor Android 프로젝트
+capacitor.config.ts      Capacitor 앱 설정
+docs/                    Android 빌드·QA 및 설계 문서
 ```
 
-### 계층 규칙 (반드시 지킬 것)
+IndexedDB는 스토어 22개, 스키마 버전 1을 사용합니다. 데이터 모델을 바꿀 때는 기존 사용자 백업과 마이그레이션 호환성을 먼저 검토해야 합니다.
 
-| 계층 | 위치 | 규칙 |
-| --- | --- | --- |
-| L1 표현 | `screens/`, `ui/` | **계산 금지.** 저장소에서 계산된 값을 받아 표시만 합니다. |
-| L2 애플리케이션 | `store/AppStore.tsx` | 유스케이스(하나의 사용자 행위 = 하나의 함수), 잔액 갱신과 저장을 같은 흐름에서 처리 |
-| L3 도메인 | `domain/` | 순수 함수. 시간·네트워크·DB에 의존하지 않음 |
-| L4 영속성 | `data/db.ts` | IndexedDB 스토어 22개, 스키마 버전 관리 |
+## 5. 금융 계산 규칙
 
----
+- 환율은 기본적으로 **1 USD당 통화 단위**로 저장합니다.
+- 다중 통화 이체는 거래 시점 환율로 출금·입금액을 비교하고 환산 정보를 각 거래에 보존합니다.
+- 투자 스냅샷은 입력한 최종 평가잔액을 기준으로 하며 입출금을 다시 더하거나 빼서 중복 계산하지 않습니다.
+- 카지노 세션 통화는 첫 Buy-in 시 결정됩니다. 이후 Buy-in과 Cash-out은 거래 시점 환율로 세션 통화에 환산합니다.
+- 카지노 Buy-in의 암호화폐 출발 자산은 현재 **USDT만 지원**합니다. BTC·ETH·SOL의 거래 시점 토큰 가격을 저장하는 기능은 아직 구현되지 않았습니다.
+- 프랍 지급 수수료는 USD 입력값을 지급일 환율로 지급 통화에 환산해 차감합니다.
 
-## 5. 데이터 구조 요약 (스키마 v1)
+## 6. 백업과 데이터 보존
 
-`kv, countries, institutions, accountTypes, accounts, cashLocations, transactions, categories, tags, exchangeRates, invSnapshots, propAccounts, propPayouts, cryptoWallets, cryptoAssets, cryptoPrices, cryptoTx, casinos, casinoSessions, casinoBuyIns, casinoCashOuts, nwHistory`
+1. 앱의 **설정 → 백업·복원**에서 JSON 백업을 내보냅니다.
+2. 복원할 때 백업 파일을 선택하고 덮어쓰기 확인을 진행합니다.
+3. 복원은 형식·필수 데이터·ID 등을 검증한 뒤 IndexedDB 단일 트랜잭션으로 교체합니다.
+4. 잘못된 백업 파일을 가져오면 기존 데이터가 유지되어야 합니다.
 
-- 모든 스토어는 `id (UUID)` 기본키, 외래키는 ID만 참조합니다.
-- **계좌 유형 · 금융기관 · 국가 · 카테고리 · 태그는 사전 테이블**이라 새 항목 추가는 `INSERT` 한 줄이며 스키마 변경이 없습니다.
-- 거래는 소프트 삭제, 계좌·지갑은 `archivedAt` 숨김 처리로 과거 기록을 보존합니다.
-- 자세한 필드·인덱스·삭제 정책은 앱의 **설계 문서**(`#/spec`) 또는 `docs/DESIGN.md` 를 참고하세요.
+**중요:** 서버 동기화와 Android 자동 백업은 사용하지 않습니다. 앱 삭제·재설치·휴대폰 교체 전에는 반드시 JSON 백업을 별도 위치에 보관하세요. 다른 휴대폰으로 데이터가 자동 복사되지 않습니다.
 
-### 순자산 공식
+## 7. Android APK
 
-```
-NW(base) = Σ accounts.balance        (accountTypes.includesInNetWorth = true)
-         + Σ cashLocations.balance
-         + Σ (cryptoAssets.quantity × 시세)
-         + Σ invSnapshots(최신).endBalance   → 계좌 balance 캐시로 반영
+Capacitor Android 프로젝트가 저장소에 포함되어 있습니다.
 
-제외: propAccounts.nominalSize · 미수령 수익 · 진행 중 세션 칩
-환산: toBase(amount, cur) = amount ÷ rate[cur] × rate[base] ,  rate[USD] ≡ 1
-```
-
----
-
-## 6. 백업과 복원
-
-1. **설정 → 백업 · 복원 → 백업 파일 내려받기** (JSON, 스키마 버전 포함)
-2. 복원: **백업 파일 선택** → 검증 → 확인 후 현재 데이터를 덮어씁니다.
-3. 초기화는 2단 확인 + 삭제 전 데이터 요약을 보여줍니다.
-4. 브라우저 저장공간이 줄어들 수 있으므로 **7일 이상 백업하지 않았다면 내려받기를 권장**합니다.
-
----
-
-## 7. GitHub 업로드
+로컬 빌드:
 
 ```bash
-git init
-git add .
-git commit -m "feat: 자산관리 앱 v0.1.0 — 계좌·이체·투자·카지노·분석·백업"
-git branch -M main
-git remote add origin https://github.com/<사용자명>/jalsalabose.git
-git push -u origin main
+npm ci
+npm run android:sync
+cd android
+./gradlew assembleDebug
 ```
 
-- 개인 금융 데이터 앱이므로 저장소는 **Private**을 권장합니다.
-- `.gitignore` 에는 `node_modules/`, `dist/`, `.env.local` 이 포함되어 있습니다.
-- 이후 GPT와 연동해 작업할 때는 `docs/DESIGN.md`(설계 문서)와 `README.md` 를 컨텍스트로 함께 주세요.
+Windows에서는 `gradlew.bat assembleDebug`를 사용합니다.
 
-### GitHub Pages 배포
+GitHub Actions는 일반 푸시와 PR에서 금융 테스트, TypeScript 검사, 웹 빌드만 수행합니다. **APK 생성은 나중에 수동으로 요청할 때만 실행**하도록 분리되어 있습니다.
 
-```bash
-npm run build
-npx gh-pages -d dist        # 또는 Vercel / Netlify 로 dist 폴더 배포
-```
+수동 APK 빌드 방법과 서명 관련 주의사항은 [docs/ANDROID-APK.md](docs/ANDROID-APK.md)를 참고하세요. 실제 기기 설치·복원·업데이트 테스트와 영구 Release 서명은 아직 완료되지 않았습니다.
 
----
+## 8. QA 상태 및 알려진 한계
 
-## 8. Android APK (12단계)
+- 자동화: 금융 회귀 테스트, TypeScript 검사, Vite 빌드가 GitHub Actions에서 실행됩니다.
+- 미완료: 실제 Android 기기에서 화면·저장·백업·복원·업데이트 검증.
+- 데이터는 기기별로 분리되어 있으며 실시간 다중 기기 동기화는 없습니다.
+- 과거 날짜로 거래를 입력해도 과거 순자산 이력 포인트를 자동 재구성하지는 않습니다.
+- 대출·부채 관리 기능은 아직 없습니다.
+- 카지노 Buy-in의 암호화폐 출발 자산은 USDT만 지원합니다.
 
-```bash
-npm install @capacitor/core @capacitor/cli @capacitor/android
-npm install @capacitor/keyboard @capacitor/app @capacitor/filesystem
-npx cap init 잘살아보세 com.jalsalabose.app --web-dir=dist
-npm run build && npx cap add android
-npx cap sync android
+QA 항목은 [docs/ANDROID-RELEASE-QA.md](docs/ANDROID-RELEASE-QA.md)에 정리되어 있습니다.
 
-cd android && ./gradlew assembleDebug      # android/app/build/outputs/apk/debug/
-./gradlew assembleRelease                  # 릴리스 (키스토어 서명 필요)
-```
+## 9. GitHub 저장소 및 보안
 
-- 웹과 Android는 **동일한 소스 · 동일한 도메인 로직 · 동일한 IndexedDB 스키마**를 공유합니다.
-- 대응 항목: safe-area, 숫자 키보드, 네이티브 날짜 선택, 하드백(시트 → 이전 탭), 오프라인 입력, 네트워크 복구 시 시세 1회 동기화.
+- 현재 저장소는 **Public**입니다. 앱의 실제 금융 데이터는 저장소에 포함하지 말고, 소스 공개를 원하지 않는다면 GitHub 저장소 설정에서 Private으로 변경하세요.
+- `.env`, `.env.*`, Android keystore 파일은 커밋하지 않도록 `.gitignore`에 포함되어 있습니다.
+- `VITE_*` 환경변수는 웹 번들에 노출될 수 있으므로 비밀 API 키나 비밀번호를 넣지 마세요.
+- Release 서명 키는 저장소에 올리지 말고, 나중에 GitHub Actions Secrets를 통해 사용해야 합니다.
+- 현재 작업은 `fix/phase-2-financial-corrections` 브랜치와 Draft PR #1에서 진행합니다. 검토가 끝나기 전에는 `main`에 병합하지 않습니다.
 
----
+## 10. 참고 문서
 
-## 9. 테스트
+- [Android APK 빌드](docs/ANDROID-APK.md)
+- [Android 출시 QA 체크리스트](docs/ANDROID-RELEASE-QA.md)
+- [최종 검토 보고서](docs/FINAL-REVIEW-2026-11-25.md)
+- [Phase 2–3 구현 기록](docs/PHASE2-3-IMPLEMENTATION.md)
 
-현재 제공되는 명령어는 `npm run dev` / `npm run build` / `npm run preview` 입니다.
-테스트 스위트(Vitest · Playwright)와 `lint` 스크립트는 **11단계**에서 추가될 예정입니다.
+## 11. 개발자 정보
 
-출고를 막아야 하는 핵심 케이스 (테스트 추가 시 가장 먼저 작성):
-
-1. 내부 이체 후 **Δ총자산 = 0**
-2. 프랍 명목 계정이 순자산에 **포함되지 않을 것**
-3. Buy-in → Cash-out → 세션 손익과 **총자산 변화가 일치**할 것
-4. 환율 변경 후 **과거 거래의 amountBase 불변**
-
----
-
-## 10. 개발 단계
-
-| 단계 | 내용 | 상태 |
-| --- | --- | --- |
-| 1 | 전체 기획 · 아키텍처 (설계 문서) | 완료 |
-| 2 | 프로젝트 초기 구성 · 디자인 토큰 · 공통 컴포넌트 | 완료 |
-| 3 | 기본 자산 관리 (국가·기관·계좌·현금/금고·순자산) | 완료 |
-| 4 | 수입 · 지출 · 카테고리 · 태그 · 이체 | 완료 |
-| 5 | 투자 관리 (일일 스냅샷 · 성과) | 완료 |
-| 6 | 프랍 트레이딩 (계정 · 성과 · 지급) | 완료 |
-| 7 | 암호화폐 (복수 지갑 · 보유량 · 시세 · 이동) | 완료 |
-| 8 | 카지노 (목록 · 세션 · Buy-in · Cash-out · 손익) | 완료 |
-| 9 | 분석 · AI 프롬프트 생성 | 완료 |
-| 10 | 백업 · 복원 · 검증 | 완료 |
-| 11 | 웹 완성 · 반응형 점검 · 배포 | 진행 |
-| 12 | Android APK (Capacitor) | 예정 |
-
----
-
-## 11. 알려진 한계 · 다음 작업
-
-- **시세 자동 동기화**는 CoinGecko 공개 API를 사용하며, 차단/오프라인 시 마지막 정상 가격을 유지하고 수동 가격 입력을 허용합니다. 거래소별 시세 소스 추가는 `src/screens/Assets.tsx` 의 `syncPrices()` 를 확장합니다.
-- **일일 자산 이력**은 거래·스냅샷 발생 시점에 순자산을 기록합니다(`nwHistory`). 과거 날짜로 거래를 입력하면 해당 날짜 포인트가 재구성되지 않습니다(향후 개선 과제).
-- **카지노 정산 기록**(`casinoSettlements`)은 현재 세션 종료 시점에 계산값으로만 두고 별도 스토어로 저장하지 않습니다. 필요 시 `domain/entities.ts` 에 스토어를 추가하세요.
-- **부채(대출) 항목**은 스키마 확장 포인트만 비워 두었습니다.
-- 단위/통합 테스트 스위트는 다음 단계(11단계 병행)로 추가 예정입니다.
-
----
-
-## 12. 개발자 정보
-
-- **개발자**: 해외선물 트레이더 / 프랍 트레이딩
-- **Telegram**: [@wti0816](https://t.me/wti0816)
-- **라이선스**: 개인 사용 목적 · 상업적 배포는 별도 협의
-
----
-
-## 13. 개인정보 · 보안
-
-- 모든 데이터는 기기 브라우저의 IndexedDB 에만 저장되며 외부 서버로 전송하지 않습니다.
-- 계좌번호, 개인 지갑 주소, **시드문구 · 개인키는 앱이 다루지도 저장하지도 않습니다.**
-- 코인 시세 요청은 심볼과 가격만 포함합니다.
-- AI 분석은 API를 호출하지 않고 프롬프트를 만들어 사용자가 직접 붙여넣습니다.
+- Telegram: [@wti0816](https://t.me/wti0816)
+- 저장소에는 별도의 표준 오픈소스 LICENSE 파일이 아직 없습니다. Public 저장소라는 사실만으로 재사용·재배포 권한이 부여되는 것은 아닙니다.

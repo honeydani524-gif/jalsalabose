@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useStore } from "../store/AppStore";
+import { amountAtBaseCurrency, netPayoutAfterUsdFee } from "../domain/finance";
 import { Badge, Bars, Btn, Card, CardTitle, Chip, Donut, Empty, Icon, Money, Row, Segmented, Spark } from "../ui/kit";
 import {
   fmtAmount,
@@ -34,15 +35,18 @@ export function AnalysisScreen() {
   const [period, setPeriod] = useState<Period>("3m");
   const from = fromOf(period);
   const s = data.settings;
+  const txBase = (t: (typeof data.transactions)[number]) => amountAtBaseCurrency(
+    t.amount, t.currency, t.fxRate, t.date, s.base, data.exchangeRates, s.rates, t.amountBase, t.baseCurrency,
+  );
 
   const history = useMemo(
-    () => data.nwHistory.filter((p) => p.t >= from).map((p) => (p.value / (s.rates[p.base] ?? 1)) * (s.rates[s.base] ?? 1)),
-    [data.nwHistory, from, s],
+    () => data.nwHistory.filter((p) => p.t >= from).map((p) => amountAtBaseCurrency(p.value, p.base, 1, p.t, s.base, data.exchangeRates, s.rates, p.value, p.base)),
+    [data.nwHistory, data.exchangeRates, from, s],
   );
 
   const txs = useMemo(() => data.transactions.filter((t) => t.date >= from), [data.transactions, from]);
-  const income = sum(txs.filter((t) => t.type === "income").map((t) => t.amountBase));
-  const expense = sum(txs.filter((t) => t.type === "expense").map((t) => t.amountBase));
+  const income = sum(txs.filter((t) => t.type === "income").map((t) => txBase(t)));
+  const expense = sum(txs.filter((t) => t.type === "expense").map((t) => txBase(t)));
 
   const monthBars = useMemo(() => {
     const out: { label: string; a: number; b: number }[] = [];
@@ -54,12 +58,12 @@ export function AnalysisScreen() {
       const list = txs.filter((t) => monthKey(t.date) === k);
       out.push({
         label: `${d.getMonth() + 1}월`,
-        a: sum(list.filter((t) => t.type === "income").map((t) => t.amountBase)),
-        b: sum(list.filter((t) => t.type === "expense").map((t) => t.amountBase)),
+        a: sum(list.filter((t) => t.type === "income").map((t) => txBase(t))),
+        b: sum(list.filter((t) => t.type === "expense").map((t) => txBase(t))),
       });
     }
     return out;
-  }, [txs, period]);
+  }, [txs, period, data.exchangeRates, s.base, s.rates]);
 
   const catRows = useMemo(() => {
     const exp = txs.filter((t) => t.type === "expense" && t.categoryId);
@@ -67,11 +71,11 @@ export function AnalysisScreen() {
     return Object.entries(g)
       .map(([id, list]) => ({
         label: data.categories.find((c) => c.id === id)?.name ?? "기타",
-        value: sum(list.map((t) => t.amountBase)),
+        value: sum(list.map((t) => txBase(t))),
       }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 6);
-  }, [txs, data.categories]);
+  }, [txs, data.categories, data.exchangeRates, s.base, s.rates]);
 
   const composition = useMemo(() => {
     const g = groupBy(nw.rows.filter((r) => r.included), (r) => r.group);
@@ -123,11 +127,15 @@ export function AnalysisScreen() {
     () =>
       data.casinos.map((c) => {
         const ids = new Set(data.casinoSessions.filter((x) => x.casinoId === c.id).map((x) => x.id));
-        const ins = sum(data.casinoBuyIns.filter((b) => ids.has(b.sessionId)).map((b) => toBase(b.amount, b.currency, s)));
-        const outs = sum(data.casinoCashOuts.filter((o) => ids.has(o.sessionId)).map((o) => toBase(o.totalAmount, o.currency, s)));
+        const ins = sum(data.casinoBuyIns.filter((b) => ids.has(b.sessionId)).map((b) =>
+          amountAtBaseCurrency(b.amount + (b.fee || 0), b.currency, b.fxRate, b.date, s.base, data.exchangeRates, s.rates),
+        ));
+        const outs = sum(data.casinoCashOuts.filter((o) => ids.has(o.sessionId)).map((o) =>
+          amountAtBaseCurrency(o.totalAmount - (o.fee || 0), o.currency, o.fxRate, o.date, s.base, data.exchangeRates, s.rates),
+        ));
         return { name: c.name, visits: ids.size, pnl: round(outs - ins, 6) };
       }),
-    [data.casinos, data.casinoSessions, data.casinoBuyIns, data.casinoCashOuts, s],
+    [data.casinos, data.casinoSessions, data.casinoBuyIns, data.casinoCashOuts, data.exchangeRates, s],
   );
 
   const topTags = useMemo(() => {
@@ -138,11 +146,11 @@ export function AnalysisScreen() {
     return Object.entries(g)
       .map(([ids, list]) => ({
         label: ids.split(",").map((id) => `#${data.tags.find((t) => t.id === id)?.name ?? ""}`).join(" "),
-        value: sum(list.map((t) => t.amountBase)),
+        value: sum(list.map((t) => txBase(t))),
       }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 5);
-  }, [txs, data.tags]);
+  }, [txs, data.tags, data.exchangeRates, s.base, s.rates]);
 
   return (
     <div className="space-y-4">
@@ -284,7 +292,10 @@ export function AnalysisScreen() {
           )}
           <div className="mt-3 rounded-xl bg-[#fef4e6] px-3 py-2 font-mono text-[11.5px] text-ink/70">
             실제 지급 수익 합계{" "}
-            <b>{fmtAmount(sum(data.propPayouts.map((x) => toBase(x.amount, x.currency, s))), s.base)}</b> (수령 계좌에 반영됨)
+            <b>{fmtAmount(sum(data.propPayouts.map((x) => amountAtBaseCurrency(
+              netPayoutAfterUsdFee(x.amount, x.fxRate || 1, x.fee || 0),
+              x.currency, x.fxRate, x.receivedAt, s.base, data.exchangeRates, s.rates,
+            ))), s.base)}</b> (수령 계좌에 반영됨)
           </div>
         </Card>
 
@@ -347,6 +358,9 @@ const DATASETS = [
 export function AIScreen() {
   const { data, nw } = useStore();
   const s = data.settings;
+  const txBase = (t: (typeof data.transactions)[number]) => amountAtBaseCurrency(
+    t.amount, t.currency, t.fxRate, t.date, s.base, data.exchangeRates, s.rates, t.amountBase, t.baseCurrency,
+  );
   const [kind, setKind] = useState<Kind>("total");
   const [days, setDays] = useState<Period>("3m");
   const [picked, setPicked] = useState<string[]>(DATASETS.map((d) => d.key));
@@ -393,13 +407,13 @@ export function AIScreen() {
 
     if (picked.includes("cashflow")) {
       const txs = data.transactions.filter((t) => t.date >= from);
-      const inc = sum(txs.filter((t) => t.type === "income").map((t) => t.amountBase));
-      const exp = sum(txs.filter((t) => t.type === "expense").map((t) => t.amountBase));
+      const inc = sum(txs.filter((t) => t.type === "income").map((t) => txBase(t)));
+      const exp = sum(txs.filter((t) => t.type === "expense").map((t) => txBase(t)));
       L.push(`## 2. 수입 · 지출`);
       L.push(`- 수입 ${fmt(inc)} (${txs.filter((t) => t.type === "income").length}건) / 지출 ${fmt(exp)} (${txs.filter((t) => t.type === "expense").length}건) / 잡금 ${fmt(inc - exp)}`);
       const g = groupBy(txs.filter((t) => t.type === "expense" && t.categoryId), (t) => t.categoryId!);
       const rows = Object.entries(g)
-        .map(([id, list]) => ({ n: data.categories.find((c) => c.id === id)?.name ?? "기타", v: sum(list.map((t) => t.amountBase)) }))
+        .map(([id, list]) => ({ n: data.categories.find((c) => c.id === id)?.name ?? "기타", v: sum(list.map((t) => txBase(t))) }))
         .sort((a, b) => b.v - a.v);
       if (rows.length) L.push(`- 지출 카테고리: ${rows.map((r) => `${r.n} ${fmt(r.v)}`).join(", ")}`);
       else L.push(`- 지출 카테고리: 데이터 부족`);
@@ -427,7 +441,12 @@ export function AIScreen() {
       data.propAccounts.forEach((p) => {
         L.push(`- ${p.firm} ${p.alias}: 명목 $${p.nominalSize.toLocaleString()}, 평가잔액 $${p.balance.toLocaleString()} (${fmtPct(p.opening ? (p.balance - p.opening) / p.opening : 0)}), 상태 ${p.status}, 목표 $${(p.target ?? 0).toLocaleString()}, 일한 최대 손실 한도 $${(p.maxDailyLoss ?? 0).toLocaleString()}`);
       });
-      const paid = sum(data.propPayouts.filter((p) => p.receivedAt >= from).map((p) => toBase(p.amount, p.currency, s)));
+      const paid = sum(data.propPayouts.filter((p) => p.receivedAt >= from).map((p) =>
+        amountAtBaseCurrency(
+          netPayoutAfterUsdFee(p.amount, p.fxRate || 1, p.fee || 0),
+          p.currency, p.fxRate, p.receivedAt, s.base, data.exchangeRates, s.rates,
+        ),
+      ));
       L.push(`- 기간 내 실제 지급받은 수익: ${fmt(paid)} (이것만 실제 자산에 반영됨)`);
       L.push(`- 미수령 가능 금액: ${fmt(sum(data.propAccounts.map((p) => p.payoutRequested)))} (순자산에서 제외)`);
       L.push("");
@@ -452,8 +471,12 @@ export function AIScreen() {
       if (data.casinos.length === 0) L.push(`- 데이터 부족: 카지노 기록 없음`);
       data.casinos.forEach((c, i) => {
         const ids = new Set(data.casinoSessions.filter((x) => x.casinoId === c.id).map((x) => x.id));
-        const bi = sum(data.casinoBuyIns.filter((b) => ids.has(b.sessionId)).map((b) => toBase(b.amount, b.currency, s)));
-        const co = sum(data.casinoCashOuts.filter((o) => ids.has(o.sessionId)).map((o) => toBase(o.totalAmount, o.currency, s)));
+        const bi = sum(data.casinoBuyIns.filter((b) => ids.has(b.sessionId)).map((b) =>
+          amountAtBaseCurrency(b.amount + (b.fee || 0), b.currency, b.fxRate, b.date, s.base, data.exchangeRates, s.rates),
+        ));
+        const co = sum(data.casinoCashOuts.filter((o) => ids.has(o.sessionId)).map((o) =>
+          amountAtBaseCurrency(o.totalAmount - (o.fee || 0), o.currency, o.fxRate, o.date, s.base, data.exchangeRates, s.rates),
+        ));
         L.push(`- ${casinoName(c.name, i)}: 방문 ${ids.size}회, Buy-in ${fmt(bi)}, Cash-out ${fmt(co)}, 손익 ${fmt(co - bi)}`);
       });
       const ongoing = data.casinoSessions.filter((x) => x.status === "ongoing").length;

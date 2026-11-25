@@ -20,6 +20,7 @@ import {
 } from "../ui/kit";
 import { fmtAmount, fmtDate, fmtPct, round, toBase } from "../domain/calc";
 import { uid } from "../data/db";
+import { amountAtBaseCurrency } from "../domain/finance";
 
 type Tab = "account" | "cash" | "crypto" | "prop";
 
@@ -97,12 +98,12 @@ function AccountForm({ id, onClose }: { id?: string; onClose: () => void }) {
             <Btn
               variant="danger"
               onClick={async () => {
-                if (data.transactions.some((t) => t.accountId === ex.id)) {
-                  setErr("거래가 있는 계좌는 삭제할 수 없습니다. ‘보관’으로 숨기세요.");
-                  return;
+                try {
+                  await remove("accounts", ex.id);
+                  onClose();
+                } catch (e) {
+                  setErr((e as Error).message);
                 }
-                await remove("accounts", ex.id);
-                onClose();
               }}
             >
               삭제
@@ -310,7 +311,10 @@ function BalanceDetail({ kind, id, onClose }: { kind: "account" | "cash"; id: st
                 sub={fmtDate(t.date)}
                 right={
                   <span className="font-mono text-[13.5px] tnum">
-                    <Money v={t.amountBase} settings={data.settings} signed={t.type === "adjust"} />
+                    <Money v={amountAtBaseCurrency(
+                      t.amount, t.currency, t.fxRate, t.date, data.settings.base,
+                      data.exchangeRates, data.settings.rates, t.amountBase, t.baseCurrency,
+                    )} settings={data.settings} signed={t.type === "adjust"} />
                   </span>
                 }
               />
@@ -337,16 +341,12 @@ function BalanceDetail({ kind, id, onClose }: { kind: "account" | "cash"; id: st
           <Btn
             variant="danger"
             onClick={async () => {
-              const used =
-                kind === "account"
-                  ? data.transactions.some((t) => t.accountId === id || t.from?.id === id)
-                  : data.transactions.some((t) => t.from?.id === id || t.legs?.some((l) => l.id === id));
-              if (used) {
-                setErr("거래가 존재하여 삭제할 수 없습니다.");
-                return;
+              try {
+                await remove(kind === "account" ? "accounts" : "cashLocations", id);
+                onClose();
+              } catch (e) {
+                setErr((e as Error).message);
               }
-              await remove(kind === "account" ? "accounts" : "cashLocations", id);
-              onClose();
             }}
           >
             삭제
@@ -929,7 +929,7 @@ function WalletForm({ id, onClose }: { id?: string; onClose: () => void }) {
       footer={
         <div className="flex gap-2">
           {ex && (
-            <Btn variant="danger" onClick={async () => { await remove("cryptoWallets", ex.id); onClose(); }}>
+            <Btn variant="danger" onClick={async () => { try { await remove("cryptoWallets", ex.id); onClose(); } catch (e) { window.alert((e as Error).message); } }}>
               삭제
             </Btn>
           )}
@@ -999,7 +999,7 @@ function PropForm({ id, onClose }: { id?: string; onClose: () => void }) {
       footer={
         <div className="flex gap-2">
           {ex && (
-            <Btn variant="danger" onClick={async () => { await remove("propAccounts", ex.id); onClose(); }}>
+            <Btn variant="danger" onClick={async () => { try { await remove("propAccounts", ex.id); onClose(); } catch (e) { window.alert((e as Error).message); } }}>
               삭제
             </Btn>
           )}

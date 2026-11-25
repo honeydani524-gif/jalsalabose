@@ -4,6 +4,7 @@
    netWorth 에 합산하지 않는다. 이 파일이 유일한 판단 기준이다.
    ──────────────────────────────────────────────────────────── */
 import { round, toBase, type Settings } from "./calc";
+import { toSessionCurrency } from "./finance";
 
 export type RelKind = "account" | "cash" | "crypto";
 
@@ -57,7 +58,16 @@ export type Category = {
 };
 export type Tag = { id: string; name: string; color: string; sortOrder: number; archivedAt?: number };
 
-export type Leg = { kind: "account" | "cash"; id: string; amount: number };
+export type Leg = {
+  kind: "account" | "cash";
+  id: string;
+  amount: number;
+  /** Transaction-time destination currency and FX snapshot (optional for legacy rows). */
+  currency?: string;
+  fxRate?: number;
+  amountBase?: number;
+  baseCurrency?: string;
+};
 
 export type TxType = "income" | "expense" | "transfer" | "casino" | "adjust";
 export type Tx = {
@@ -67,6 +77,7 @@ export type Tx = {
   currency: string;
   fxRate: number;
   amountBase: number;
+  baseCurrency?: string;
   date: number;
   accountId?: string;
   from?: { kind: "account" | "cash"; id: string };
@@ -77,6 +88,8 @@ export type Tx = {
   counterparty?: string;
   sessionId?: string;
   reason?: string;
+  /** Links internally generated transfer rows to an investment snapshot. */
+  snapshotId?: string;
   createdAt: number;
 };
 
@@ -126,6 +139,10 @@ export type PropPayout = {
   receivedAt: number;
   to: { kind: "account" | "cash"; id: string };
   fee: number;
+  /** Links the payout record to its generated transaction for safe deletion. */
+  transactionId?: string;
+  /** Exact amount removed from payoutRequested, so deletion can restore it. */
+  requestedReduction?: number;
   memo?: string;
 };
 export type Wallet = {
@@ -175,6 +192,8 @@ export type Session = {
   endedAt?: number;
   status: "ongoing" | "closed";
   currency: string;
+  /** Units of session currency per USD, captured when the first Buy-in created the session. */
+  fxRate?: number;
   memo?: string;
 };
 export type BuyIn = {
@@ -184,6 +203,10 @@ export type BuyIn = {
   amount: number;
   currency: string;
   fxRate: number;
+  /** Buy-in amount expressed in the fixed session currency at transaction time. */
+  sessionAmount?: number;
+  /** Actual chips received, expressed in the fixed session currency. */
+  chipSessionAmount?: number;
   chipAmount: number;
   fee: number;
   date: number;
@@ -198,7 +221,17 @@ export type CashOut = {
   fee: number;
   date: number;
   memo?: string;
-  legs: { kind: RelKind; id: string; amount: number }[];
+  /** Cash-out total expressed in the fixed session currency at transaction time. */
+  sessionAmount?: number;
+  legs: {
+    kind: RelKind;
+    id: string;
+    amount: number;
+    currency?: string;
+    fxRate?: number;
+    /** Leg amount expressed in session currency at transaction time. */
+    amountSession?: number;
+  }[];
 };
 export type NwPoint = { id: string; t: number; value: number; base: string };
 
@@ -227,16 +260,92 @@ export function cryptoTotalBase(assets: Asset[], prices: Price[], settings: Sett
   return round(assets.reduce((s, a) => s + toBase(a.quantity * assetPrice(a, prices), "USD", settings), 0), 6);
 }
 
+
+export type BalanceDelta = { kind: "account" | "cash"; id: string; delta: number };
+
+/** Return the native-currency balance changes needed to undo a ledger transaction. */
+export function transactionReversalDeltas(tx: Tx, omitTransferSource = false): BalanceDelta[] {
+  if (tx.type === "income" || tx.type === "expense") {
+    if (!tx.accountId) throw new Error("거래에 연결된 계좌가 없어 잔액을 복구할 수 없습니다.");
+    return [{ kind: "account", id: tx.accountId, delta: tx.type === "income" ? -tx.amount : tx.amount }];
+  }
+  if (tx.type === "transfer") {
+    if (!tx.from && !omitTransferSource)
+      throw new Error("이체 출발 자산 정보가 없어 잔액을 복구할 수 없습니다.");
+    const deltas: BalanceDelta[] = [];
+    if (tx.from && !omitTransferSource)
+      deltas.push({ kind: tx.from.kind, id: tx.from.id, delta: tx.amount });
+    (tx.legs ?? []).forEach((leg) => deltas.push({
+      kind: leg.kind,
+      id: leg.id,
+      delta: -leg.amount,
+    }));
+    return deltas;
+  }
+  if (tx.type === "adjust") {
+    if (!tx.from) throw new Error("잔액 조정 자산 정보가 없습니다.");
+    return [{ kind: tx.from.kind, id: tx.from.id, delta: -tx.amount }];
+  }
+  if (tx.type === "casino") {
+    if (!tx.from) throw new Error("카지노 거래 출발 자산 정보가 없습니다.");
+    return [{ kind: tx.from.kind, id: tx.from.id, delta: tx.amount }];
+  }
+  return [];
+}
+
+/* ── 세션 통화 기준 금액 (과거 데이터 호환) ─────────────── */
+export function casinoSessionTotals(
+  sessionId: string,
+  buyIns: BuyIn[],
+  cashOuts: CashOut[],
+  session?: Pick<Session, "currency" | "fxRate">,
+): { currency: string; buyIn: number; cashOut: number; open: number } {
+  const sessionBuyIns = buyIns.filter((b) => b.sessionId === sessionId).sort((a, b) => a.date - b.date);
+  const sessionCashOuts = cashOuts.filter((c) => c.sessionId === sessionId);
+  const first = sessionBuyIns[0];
+  // The persisted session is authoritative: a later Buy-in may be entered with an earlier date.
+  const currency = session?.currency ?? first?.currency ?? "USD";
+  const sessionFxRate = session?.fxRate ?? first?.fxRate ?? 1;
+  const buyIn = sessionBuyIns.reduce(
+    (sum, b) => sum + (typeof b.sessionAmount === "number"
+      ? b.sessionAmount
+      : toSessionCurrency(b.amount + (b.fee || 0), b.fxRate || sessionFxRate, sessionFxRate)),
+    0,
+  );
+  const cashOut = sessionCashOuts.reduce(
+    (sum, c) => sum + (typeof c.sessionAmount === "number"
+      ? c.sessionAmount
+      : toSessionCurrency(c.totalAmount - (c.fee || 0), c.fxRate || sessionFxRate, sessionFxRate)),
+    0,
+  );
+  const chipIn = sessionBuyIns.reduce(
+    (sum, b) => sum + (typeof b.chipSessionAmount === "number"
+      ? b.chipSessionAmount
+      : toSessionCurrency(b.chipAmount ?? b.amount, b.fxRate || sessionFxRate, sessionFxRate)),
+    0,
+  );
+  const chipOut = sessionCashOuts.reduce(
+    (sum, c) => sum + toSessionCurrency(c.totalAmount, c.fxRate || sessionFxRate, sessionFxRate),
+    0,
+  );
+  return {
+    currency,
+    buyIn: round(buyIn, 6),
+    cashOut: round(cashOut, 6),
+    open: round(chipIn - chipOut, 6),
+  };
+}
+
 /* ── 진행 중 칩 (미정산) ────────────────────────────────── */
 export function ongoingChipBase(
   sessionId: string,
   buyIns: BuyIn[],
   cashOuts: CashOut[],
   settings: Settings,
+  session?: Pick<Session, "currency" | "fxRate">,
 ): number {
-  const bi = buyIns.filter((b) => b.sessionId === sessionId).reduce((s, b) => s + b.amount, 0);
-  const co = cashOuts.filter((c) => c.sessionId === sessionId).reduce((s, c) => s + c.totalAmount, 0);
-  return round(toBase(Math.max(0, bi - co), buyIns.find((b) => b.sessionId === sessionId)?.currency ?? settings.base, settings), 6);
+  const totals = casinoSessionTotals(sessionId, buyIns, cashOuts, session);
+  return round(toBase(Math.max(0, totals.open), totals.currency, settings), 6);
 }
 
 /* ── 순자산 ────────────────────────────────────────────── */
@@ -333,16 +442,20 @@ export function computeNetWorth(d: DataSlice): NwResult {
 
   const crypto = cryptoTotalBase(d.cryptoAssets, d.cryptoPrices, s);
   d.cryptoWallets.forEach((w) => {
-    const v = walletValueIn(w.id, d.cryptoAssets, d.cryptoPrices, s);
-    const qty = d.cryptoAssets.filter((a) => a.walletId === w.id);
-    if (qty.length === 0) return;
+    const walletAssets = d.cryptoAssets.filter((a) => a.walletId === w.id);
+    if (walletAssets.length === 0) return;
+    const usdValue = walletAssets.reduce(
+      (sum, asset) => sum + asset.quantity * assetPrice(asset, d.cryptoPrices),
+      0,
+    );
+    const baseValue = walletValueIn(w.id, d.cryptoAssets, d.cryptoPrices, s);
     rows.push({
       id: w.id,
       group: "암호화폐",
       label: w.name,
       currency: "USD",
-      amount: round(v / (s.base === "USD" ? 1 : 1), 6),
-      base: round(v, 6),
+      amount: round(usdValue, 6),
+      base: round(baseValue, 6),
       included: true,
     });
   });
@@ -377,15 +490,15 @@ export function computeNetWorth(d: DataSlice): NwResult {
   d.casinoSessions
     .filter((x) => x.status === "ongoing")
     .forEach((ses) => {
-      const v = ongoingChipBase(ses.id, d.casinoBuyIns, d.casinoCashOuts, s);
+      const v = ongoingChipBase(ses.id, d.casinoBuyIns, d.casinoCashOuts, s, ses);
       if (v <= 0) return;
-      const bi = d.casinoBuyIns.find((b) => b.sessionId === ses.id);
+      const totals = casinoSessionTotals(ses.id, d.casinoBuyIns, d.casinoCashOuts, ses);
       excluded.push({
         id: `${ses.id}-chip`,
         group: "제외 · 카지노",
         label: `진행 중 세션 칩`,
-        currency: bi?.currency ?? s.base,
-        amount: round(bi ? bi.amount - d.casinoCashOuts.filter((c) => c.sessionId === ses.id).reduce((a, c) => a + c.totalAmount, 0) : 0, 6),
+        currency: totals.currency,
+        amount: totals.open,
         base: round(v, 6),
         included: false,
         reason: "미정산",

@@ -18,11 +18,10 @@ import {
 } from "react";
 import {
   allRows,
-  clearAll,
-  clearStore,
-  delRow,
   putRow,
   putRows,
+  writeBatch,
+  replaceAll,
   STORE_LIST,
   uid,
   type StoreName,
@@ -30,13 +29,14 @@ import {
 import {
   DEFAULT_SETTINGS,
   dayKey,
-  rateOf,
   round,
-  toBase,
   type Settings,
 } from "../domain/calc";
+import { convertAtRates, netPayoutAfterUsdFee, rateAt as historicalRateAt, toSessionCurrency } from "../domain/finance";
 import {
   computeNetWorth,
+  casinoSessionTotals,
+  transactionReversalDeltas,
   type Account,
   type Asset,
   type BuyIn,
@@ -114,6 +114,7 @@ export type StoreValue = {
   nw: NwResult;
   save: (store: StoreName, row: { id: string } & Record<string, unknown>) => Promise<void>;
   remove: (store: StoreName, id: string) => Promise<void>;
+  removeTransaction: (id: string) => Promise<void>;
   setSettings: (patch: Partial<Settings>) => Promise<void>;
   applyTx: (input: TxInput) => Promise<void>;
   setBalance: (kind: "account" | "cash", id: string, next: number, reason: string) => Promise<void>;
@@ -302,13 +303,63 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<Data | null>(null);
   const histLock = useRef(false);
+  const commitBusy = useRef(false);
 
-  const commit = useCallback((next: Data, persist: Persist = []) => {
-    ref.current = next;
-    setData(next);
-    persist.forEach(([store, row]) => {
-      if (row) putRow(store, row).catch((e) => setError(String(e?.message ?? e)));
-    });
+  // Whole-database replacement (restore/reset/sample) must be mutually exclusive
+  // with normal commits, and publish in-memory state before releasing the lock.
+  const replaceAllAndPublish = useCallback(async (
+    rowsByStore: Record<StoreName, { id: string }[]>,
+    next: Data,
+  ) => {
+    if (commitBusy.current) {
+      const message = "다른 저장 작업이 진행 중입니다. 잠시 후 다시 시도하세요.";
+      setError(message);
+      throw new Error(message);
+    }
+    commitBusy.current = true;
+    try {
+      await replaceAll(rowsByStore);
+      ref.current = next;
+      setData(next);
+      setError(null);
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e));
+      throw e;
+    } finally {
+      commitBusy.current = false;
+    }
+  }, []);
+
+  const commit = useCallback(async (next: Data, persist: Persist = [], deletes: [StoreName, string][] = []) => {
+    if (commitBusy.current) {
+      const message = "다른 저장 작업이 진행 중입니다. 잠시 후 다시 시도하세요.";
+      setError(message);
+      throw new Error(message);
+    }
+    commitBusy.current = true;
+    const previous = ref.current;
+    const writes: [StoreName, { id: string }][] = persist.flatMap(([store, row]) =>
+      row ? [[store, row] as [StoreName, { id: string }]] : [],
+    );
+    const oldPoint = previous?.nwHistory[previous.nwHistory.length - 1];
+    const newPoint = next.nwHistory[next.nwHistory.length - 1];
+    if (
+      newPoint &&
+      (!oldPoint || newPoint.id !== oldPoint.id || newPoint.t !== oldPoint.t ||
+        newPoint.value !== oldPoint.value || newPoint.base !== oldPoint.base)
+    ) writes.push(["nwHistory", newPoint]);
+
+    try {
+      await writeBatch(writes, deletes);
+      ref.current = next;
+      setData(next);
+      setError(null);
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e));
+      throw e;
+    } finally {
+      commitBusy.current = false;
+    }
   }, []);
 
   /* ── 순자산 이력 기록 (같은 날은 마지막 값만 갱신) ── */
@@ -330,7 +381,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       pts.push({ id: uid(), t: now, value: nw.total, base: d.settings.base });
     }
     const next = { ...d, nwHistory: pts };
-    putRow("nwHistory", pts[pts.length - 1]).catch(() => undefined);
     return next;
   }, []);
 
@@ -340,7 +390,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     (async () => {
       try {
         const rows = await Promise.all(
-          STORE_LIST.map((s) => allRows<never>(s).catch(() => [] as never[])),
+          STORE_LIST.map((s) => allRows<never>(s)),
         );
         const map = Object.fromEntries(STORE_LIST.map((s, i) => [s, rows[i]])) as unknown as Record<
           StoreName,
@@ -383,8 +433,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         }
         if (loaded.casinoBuyIns === undefined) loaded.casinoBuyIns = [];
         if (!alive) return;
-        ref.current = loaded;
-        setData(recordHistory(loaded));
+        await commit(recordHistory(loaded));
       } catch (e) {
         if (alive) setError(`데이터 로드 실패: ${String((e as Error)?.message ?? e)}`);
       }
@@ -392,7 +441,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     return () => {
       alive = false;
     };
-  }, [recordHistory]);
+  }, [recordHistory, commit]);
 
   const save = useCallback(
     async (store: StoreName, row: { id: string } & Record<string, unknown>) => {
@@ -400,19 +449,112 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!d) return;
       const list = (d as unknown as Record<StoreName, { id: string }[]>)[store] ?? [];
       const next = { ...d, [store]: upsert(list, row) } as Data;
-      commit(recordHistory(next), [[store, row]]);
+      await commit(recordHistory(next), [[store, row]]);
     },
     [commit, recordHistory],
   );
 
   const remove = useCallback(
     async (store: StoreName, id: string) => {
+      if (store === "transactions")
+        throw new Error("거래 삭제는 잔액 복구가 포함된 removeTransaction을 사용해야 합니다.");
       const d = ref.current;
       if (!d) return;
+      if (store === "accounts" || store === "cashLocations") {
+        const kind = store === "accounts" ? "account" : "cash";
+        const referenced =
+          d.transactions.some((tx) =>
+            (tx.accountId === id && kind === "account") ||
+            (tx.from?.kind === kind && tx.from.id === id) ||
+            (tx.legs ?? []).some((leg) => leg.kind === kind && leg.id === id)
+          ) ||
+          d.invSnapshots.some((snapshot) => kind === "account" && snapshot.accountId === id) ||
+          d.propPayouts.some((payout) => payout.to.kind === kind && payout.to.id === id) ||
+          d.casinoBuyIns.some((buyIn) => buyIn.from.kind === kind && buyIn.from.id === id) ||
+          d.casinoCashOuts.some((cashOut) =>
+            cashOut.legs.some((leg) => leg.kind === kind && leg.id === id)
+          );
+        if (referenced) {
+          throw new Error("거래·투자·카지노·프랍 기록에서 사용 중인 자산은 삭제할 수 없습니다. 보관 처리해 주세요.");
+        }
+      }
+      if (store === "cryptoWallets") {
+        const referenced =
+          d.cryptoAssets.some((asset) => asset.walletId === id) ||
+          d.cryptoTx.some((tx) =>
+            tx.walletId === id || tx.fromWalletId === id || tx.toWalletId === id
+          ) ||
+          d.casinoBuyIns.some((buyIn) => buyIn.from.kind === "crypto" && buyIn.from.id === id) ||
+          d.casinoCashOuts.some((cashOut) =>
+            cashOut.legs.some((leg) => leg.kind === "crypto" && leg.id === id)
+          );
+        if (referenced)
+          throw new Error("코인 잔액 또는 거래·카지노 기록에서 사용 중인 지갑은 삭제할 수 없습니다.");
+      }
+      if (store === "propAccounts" && d.propPayouts.some((payout) => payout.propAccountId === id))
+        throw new Error("지급 기록이 연결된 프랍 계정은 삭제할 수 없습니다.");
+      if (store === "casinos" && d.casinoSessions.some((session) => session.casinoId === id))
+        throw new Error("세션 기록이 연결된 카지노는 삭제할 수 없습니다.");
       const list = (d as unknown as Record<StoreName, { id: string }[]>)[store] ?? [];
       const next = { ...d, [store]: list.filter((r) => r.id !== id) } as Data;
-      commit(recordHistory(next));
-      delRow(store, id).catch(() => undefined);
+      await commit(recordHistory(next), [], [[store, id]]);
+    },
+    [commit, recordHistory],
+  );
+
+  const removeTransaction = useCallback(
+    async (id: string) => {
+      const d = ref.current;
+      if (!d) return;
+      const tx = d.transactions.find((row) => row.id === id);
+      if (!tx) return;
+
+      const legacySnapshot = tx.type === "transfer" &&
+        /^\d{4}-\d{2}-\d{2} 투자 (입금|출금)$/.test(tx.memo ?? "");
+      if (tx.snapshotId || legacySnapshot)
+        throw new Error("투자 스냅샷에서 자동 생성된 이체입니다. 거래 내역에서 따로 삭제하지 말고 해당 스냅샷을 수정하세요.");
+
+      const payout = d.propPayouts.find((row) => row.transactionId === tx.id);
+      const legacyPayout = !payout && tx.categoryId === "in-invest" &&
+        !!tx.counterparty && (tx.memo ?? "").includes(" 지급");
+      if (legacyPayout)
+        throw new Error("이전 버전의 프랍 지급 기록은 거래와 지급 내역이 연결되어 있지 않아 개별 삭제를 막았습니다. 데이터가 어긋나지 않도록 유지해 주세요.");
+
+      const deltas = transactionReversalDeltas(tx, Boolean(payout && tx.type === "transfer"));
+      let next: Data = {
+        ...d,
+        transactions: d.transactions.filter((row) => row.id !== tx.id),
+      };
+      const persist: Persist = [];
+      for (const item of deltas) {
+        const exists = item.kind === "account"
+          ? next.accounts.some((row) => row.id === item.id)
+          : next.cashLocations.some((row) => row.id === item.id);
+        if (!exists)
+          throw new Error("거래에 연결된 자산을 찾을 수 없어 안전하게 잔액을 복구할 수 없습니다.");
+        next = bumpRel(next, item.kind, item.id, item.delta, persist);
+      }
+
+      const deletes: [StoreName, string][] = [["transactions", tx.id]];
+      if (payout) {
+        const propAccount = next.propAccounts.find((row) => row.id === payout.propAccountId);
+        if (!propAccount)
+          throw new Error("프랍 지급에 연결된 계정을 찾을 수 없어 안전하게 삭제할 수 없습니다.");
+        const requestedReduction = payout.requestedReduction ?? payout.amount;
+        const updatedProp = {
+          ...propAccount,
+          payoutRequested: round(propAccount.payoutRequested + requestedReduction, 6),
+        };
+        next = {
+          ...next,
+          propAccounts: upsert(next.propAccounts, updatedProp),
+          propPayouts: next.propPayouts.filter((row) => row.id !== payout.id),
+        };
+        persist.push(["propAccounts", updatedProp]);
+        deletes.push(["propPayouts", payout.id]);
+      }
+
+      await commit(recordHistory(next), persist, deletes);
     },
     [commit, recordHistory],
   );
@@ -421,9 +563,36 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     async (patch: Partial<Settings>) => {
       const d = ref.current;
       if (!d) return;
-      const row = { ...d.settings, ...patch, id: "settings" } as Settings & { id: string };
-      const next = { ...d, settings: row } as Data;
-      commit(next, [["kv", row]]);
+      const mergedRates = patch.rates
+        ? { ...d.settings.rates, ...patch.rates }
+        : d.settings.rates;
+      if (patch.base !== undefined && !["USD", "KRW", "KHR"].includes(patch.base))
+        throw new Error("지원하지 않는 기준 통화입니다.");
+      Object.entries(mergedRates).forEach(([currency, rate]) => {
+        if (!["USD", "KRW", "KHR"].includes(currency) ||
+            typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0 ||
+            (currency === "USD" && rate !== 1))
+          throw new Error(`${currency} 환율은 지원 통화의 0보다 큰 숫자여야 하며 USD는 1이어야 합니다.`);
+      });
+      const row = { ...d.settings, ...patch, rates: mergedRates, id: "settings" } as Settings & { id: string };
+      const next: Data = { ...d, settings: row };
+      const persist: Persist = [["kv", row]];
+      if (patch.rates) {
+        const effectiveAt = Date.now();
+        const newRates = Object.entries(patch.rates)
+          .filter(([currency, rate]) => currency !== "USD" && d.settings.rates[currency] !== rate)
+          .map(([currency, rate]) => ({
+            id: `rate-${currency}-${effectiveAt}`,
+            base: currency,
+            rate,
+            effectiveAt,
+            source: "manual" as const,
+            memo: "설정에서 변경",
+          }));
+        next.exchangeRates = [...d.exchangeRates, ...newRates];
+        newRates.forEach((rate) => persist.push(["exchangeRates", rate]));
+      }
+      await commit(next, persist);
     },
     [commit],
   );
@@ -485,37 +654,76 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     return row;
   };
 
+  const rateAtTx = (d: Data, currency: string, timestamp: number) =>
+    historicalRateAt(currency, timestamp, d.exchangeRates, d.settings.rates);
+  const toBaseAtTx = (d: Data, amount: number, currency: string, timestamp: number) =>
+    round(
+      (amount / rateAtTx(d, currency, timestamp)) * rateAtTx(d, d.settings.base, timestamp),
+      6,
+    );
+
   /* ── 거래 (수입 · 지출 · 이체 · 조정) ── */
   const applyTx = useCallback(
     async (input: TxInput) => {
       const d = ref.current;
       if (!d) return;
+      if (!Number.isFinite(input.amount) || !Number.isFinite(input.date))
+        throw new Error("거래 금액과 날짜는 유효한 숫자여야 합니다.");
       if (input.type === "income" || input.type === "expense") {
         if (!input.accountId) throw new Error("계좌를 선택하세요.");
         if (input.amount <= 0) throw new Error("금액은 0보다 커야 합니다.");
       }
+      let normalizedLegs: Leg[] | undefined;
       if (input.type === "transfer") {
         if (!input.from) throw new Error("출발 자산을 선택하세요.");
+        if (input.amount <= 0) throw new Error("출발 금액은 0보다 커야 합니다.");
+        const sourceRow = input.from.kind === "account"
+          ? d.accounts.find((a) => a.id === input.from!.id)
+          : d.cashLocations.find((a) => a.id === input.from!.id);
+        if (!sourceRow) throw new Error("출발 자산을 찾을 수 없습니다.");
+        if (sourceRow.currency !== input.currency)
+          throw new Error("출발 자산의 통화가 입력한 통화와 다릅니다.");
         const legs = input.legs ?? [];
         if (legs.length === 0) throw new Error("도착 자산을 추가하세요.");
-        const total = legs.reduce((s, l) => s + l.amount, 0);
-        if (Math.abs(total - input.amount) > 1e-6)
-          throw new Error(`도착 합계(${total})가 출발 금액(${input.amount})과 다릅니다.`);
+        normalizedLegs = legs.map((leg) => {
+          if (!Number.isFinite(leg.amount) || leg.amount <= 0)
+            throw new Error("도착 금액은 0보다 큰 유효한 숫자여야 합니다.");
+          const destination = leg.kind === "account"
+            ? d.accounts.find((a) => a.id === leg.id)
+            : d.cashLocations.find((a) => a.id === leg.id);
+          if (!destination) throw new Error("도착 자산을 찾을 수 없습니다.");
+          if (input.from!.kind === leg.kind && input.from!.id === leg.id)
+            throw new Error("출발 자산과 도착 자산은 달라야 합니다.");
+          const currency = destination.currency;
+          const fxRate = rateAtTx(d, currency, input.date);
+          return {
+            ...leg,
+            currency,
+            fxRate,
+            amountBase: toBaseAtTx(d, leg.amount, currency, input.date),
+            baseCurrency: d.settings.base,
+          };
+        });
+        const sourceBase = input.amount / rateAtTx(d, input.currency, input.date);
+        const destinationBase = normalizedLegs.reduce((sum, leg) => sum + leg.amount / (leg.fxRate ?? 1), 0);
+        if (Math.abs(sourceBase - destinationBase) > 0.01)
+          throw new Error(`환산 기준 도착 합계(${round(destinationBase, 6)})가 출발 금액(${round(sourceBase, 6)})과 다릅니다.`);
         assertBalance(d, input.from.kind, input.from.id, input.amount);
       }
 
-      const fxRate = rateOf(d.settings, input.currency);
+      const fxRate = rateAtTx(d, input.currency, input.date);
       const tx: Tx = {
         id: uid(),
         type: input.type,
         amount: round(input.amount, 6),
         currency: input.currency,
         fxRate,
-        amountBase: round(toBase(input.amount, input.currency, d.settings), 6),
+        amountBase: toBaseAtTx(d, input.amount, input.currency, input.date),
+        baseCurrency: d.settings.base,
         date: input.date,
         accountId: input.accountId,
         from: input.from,
-        legs: input.legs,
+        legs: normalizedLegs ?? input.legs,
         categoryId: input.categoryId,
         tagIds: input.tagIds ?? [],
         memo: input.memo,
@@ -536,7 +744,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }
       if (input.type === "transfer" && input.from) {
         next = bumpRel(next, input.from.kind, input.from.id, -input.amount, pers);
-        input.legs!.forEach((l) => {
+        normalizedLegs!.forEach((l) => {
           next = bumpRel(next, l.kind, l.id, l.amount, pers);
         });
       }
@@ -548,7 +756,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         next = bumpRel(next, input.from.kind, input.from.id, -input.amount, pers);
       }
 
-      commit(recordHistory(next), pers);
+      await commit(recordHistory(next), pers);
     },
     [commit, recordHistory],
   );
@@ -557,18 +765,22 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     async (kind: "account" | "cash", id: string, next: number, reason: string) => {
       const d = ref.current;
       if (!d) return;
+      if (!Number.isFinite(next)) throw new Error("새 잔액은 유효한 숫자여야 합니다.");
       const row = kind === "account" ? d.accounts.find((a) => a.id === id) : d.cashLocations.find((c) => c.id === id);
       if (!row) return;
       const delta = round(next - row.balance, 6);
       if (delta === 0) return;
+      const date = Date.now();
+      const fxRate = rateAtTx(d, row.currency, date);
       const tx: Tx = {
         id: uid(),
         type: "adjust",
         amount: delta,
         currency: row.currency,
-        fxRate: rateOf(d.settings, row.currency),
-        amountBase: round(toBase(delta, row.currency, d.settings), 6),
-        date: Date.now(),
+        fxRate,
+        amountBase: toBaseAtTx(d, delta, row.currency, date),
+        baseCurrency: d.settings.base,
+        date,
         from: { kind, id },
         tagIds: [],
         reason,
@@ -578,7 +790,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const pers: Persist = [["transactions", tx]];
       let next2: Data = { ...d, transactions: [...d.transactions, tx] };
       next2 = bumpRel(next2, kind, id, delta, pers);
-      commit(recordHistory(next2), pers);
+      await commit(recordHistory(next2), pers);
     },
     [commit, recordHistory],
   );
@@ -599,11 +811,27 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!d) return;
       const acc = d.accounts.find((a) => a.id === input.accountId);
       if (!acc) throw new Error("계좌를 찾을 수 없습니다.");
-      const prev = d.invSnapshots
+      if (![input.endBalance, input.deposit, input.withdrawal].every(Number.isFinite) ||
+          !/^\d{4}-\d{2}-\d{2}$/.test(input.date) ||
+          Number.isNaN(new Date(`${input.date}T12:00:00`).getTime()))
+        throw new Error("평가 날짜와 금액을 확인하세요.");
+      if (input.endBalance < 0 || input.deposit < 0 || input.withdrawal < 0)
+        throw new Error("잔액과 입출금은 음수일 수 없습니다.");
+      if (input.fromId && input.fromKind === undefined)
+        throw new Error("자금 이동 자산 유형을 확인할 수 없습니다.");
+      if (input.fromId && input.fromKind === "account" && input.fromId === input.accountId)
+        throw new Error("투자 계좌 자신을 자금 이동 대상으로 선택할 수 없습니다.");
+
+      const previousSnapshot = d.invSnapshots
         .filter((s) => s.accountId === input.accountId && s.date < input.date)
         .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
-      const prevBal = prev ? prev.endBalance : acc.openingBalance;
-
+      const laterSnapshot = d.invSnapshots
+        .filter((s) => s.accountId === input.accountId && s.date > input.date)
+        .sort((a, b) => (a.date > b.date ? 1 : -1))[0];
+      const previousBalance = previousSnapshot?.endBalance ?? acc.openingBalance;
+      const effectiveEndBalance = laterSnapshot?.endBalance ?? input.endBalance;
+      if (input.withdrawal > previousBalance + input.deposit + 1e-6)
+        throw new Error("이전 평가잔액과 입금액보다 큰 금액을 출금할 수 없습니다.");
       const existing = d.invSnapshots.find(
         (s) => s.accountId === input.accountId && s.date === input.date,
       );
@@ -617,60 +845,105 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         memo: input.memo,
         createdAt: Date.now(),
       };
-      const pers: Persist = [["invSnapshots", snap]];
+      const oldSnapshotTxs = d.transactions.filter((tx) => {
+        if (tx.snapshotId === snap.id) return true;
+        if (tx.snapshotId || tx.type !== "transfer") return false;
+        const isSnapshotMemo =
+          tx.memo === `${input.date} 투자 입금` || tx.memo === `${input.date} 투자 출금`;
+        if (!isSnapshotMemo) return false;
+        const touchesInvestment =
+          (tx.from?.kind === "account" && tx.from.id === input.accountId) ||
+          (tx.legs ?? []).some((leg) => leg.kind === "account" && leg.id === input.accountId);
+        return touchesInvestment;
+      });
+      const oldSnapshotTxIds = new Set(oldSnapshotTxs.map((tx) => tx.id));
       let next: Data = {
         ...d,
         invSnapshots: existing
           ? d.invSnapshots.map((s) => (s.id === snap.id ? snap : s))
           : [...d.invSnapshots, snap],
+        transactions: d.transactions.filter((tx) => !oldSnapshotTxIds.has(tx.id)),
+        accounts: d.accounts.map((a) =>
+          a.id === input.accountId ? { ...a, balance: round(effectiveEndBalance, 6) } : a,
+        ),
       };
-
-      // 계좌 잔액 캐시 갱신
-      const accounts = next.accounts.map((a) =>
-        a.id === input.accountId ? { ...a, balance: input.endBalance } : a,
-      );
-      const accRow = accounts.find((a) => a.id === input.accountId)!;
-      next = { ...next, accounts };
+      const pers: Persist = [["invSnapshots", snap]];
+      const accRow = next.accounts.find((a) => a.id === input.accountId)!;
       pers.push(["accounts", accRow]);
 
-      // 타 계좌에서 들어온 입금/출금이면 내부 이체 1건 생성 (ΔΣ = 0)
-      if (input.fromId && (input.deposit > 0 || input.withdrawal > 0)) {
-        const amount = input.deposit > 0 ? input.deposit : input.withdrawal;
-        const dir = input.deposit > 0 ? 1 : -1;
+      // Reverse any earlier flow rows for this same snapshot before replacing them.
+      // Persist every reversed source/destination row, even if the user changes or
+      // removes the selected source while editing the snapshot.
+      oldSnapshotTxs.forEach((tx) => {
+        if (tx.from) next = bumpRel(next, tx.from.kind, tx.from.id, tx.amount, pers);
+        (tx.legs ?? []).forEach((leg) => {
+          next = bumpRel(next, leg.kind, leg.id, -leg.amount, pers);
+        });
+      });
+      // The snapshot's ending balance is authoritative, including when an older
+      // snapshot is edited and its previously generated flow rows are reversed.
+      next = {
+        ...next,
+        accounts: next.accounts.map((a) =>
+          a.id === input.accountId ? { ...a, balance: round(effectiveEndBalance, 6) } : a,
+        ),
+      };
+      const authoritativeAccount = next.accounts.find((a) => a.id === input.accountId)!;
+      pers.push(["accounts", authoritativeAccount]);
+
+      if ((input.deposit > 0 || input.withdrawal > 0) && input.fromId) {
         const fromKind = input.fromKind ?? "account";
-        const legs: Leg[] =
-          dir === 1
-            ? [{ kind: "account", id: input.accountId, amount }]
-            : [{ kind: fromKind, id: input.fromId, amount }];
-        const tx: Tx = {
-          id: uid(),
-          type: "transfer",
-          amount,
-          currency: acc.currency,
-          fxRate: rateOf(d.settings, acc.currency),
-          amountBase: round(toBase(amount, acc.currency, d.settings), 6),
-          date: Date.now(),
-          from: dir === 1 ? { kind: fromKind, id: input.fromId } : { kind: "account", id: input.accountId },
-          legs,
-          tagIds: [],
-          memo: `${input.date} 투자 ${input.deposit > 0 ? "입금" : "출금"}`,
-          createdAt: Date.now(),
-        };
-        const p2: Persist = [["transactions", tx]];
-        let n2: Data = { ...next, transactions: [...next.transactions, tx] };
-        if (dir === 1) {
-          n2 = bumpRel(n2, fromKind, input.fromId, -amount, p2);
-          n2 = bumpRel(n2, "account", input.accountId, amount, p2);
-        } else {
-          n2 = bumpRel(n2, "account", input.accountId, -amount, p2);
-          n2 = bumpRel(n2, fromKind, input.fromId, amount, p2);
+        const sourceRow =
+          fromKind === "account"
+            ? next.accounts.find((a) => a.id === input.fromId)
+            : next.cashLocations.find((a) => a.id === input.fromId);
+        if (!sourceRow) throw new Error("자금 이동 자산을 찾을 수 없습니다.");
+        const sourceCurrency = sourceRow.currency;
+        const txDate = new Date(`${input.date}T12:00:00`).getTime();
+        const sourceFx = rateAtTx(d, sourceCurrency, txDate);
+        const investmentFx = rateAtTx(d, acc.currency, txDate);
+        const baseFx = rateAtTx(d, d.settings.base, txDate);
+
+        if (input.deposit > 0) {
+          const sourceAmount = round(convertAtRates(input.deposit, investmentFx, sourceFx), 6);
+          assertBalance(next, fromKind, input.fromId, sourceAmount);
+          const tx: Tx = {
+            id: uid(), type: "transfer", amount: sourceAmount, currency: sourceCurrency,
+            fxRate: sourceFx, amountBase: round((sourceAmount / sourceFx) * baseFx, 6), baseCurrency: d.settings.base,
+            date: txDate, from: { kind: fromKind, id: input.fromId },
+            legs: [{
+              kind: "account", id: input.accountId, amount: round(input.deposit, 6),
+              currency: acc.currency, fxRate: investmentFx,
+              amountBase: round((input.deposit / investmentFx) * baseFx, 6), baseCurrency: d.settings.base,
+            }],
+            tagIds: [], memo: `${input.date} 투자 입금`, snapshotId: snap.id, createdAt: Date.now(),
+          };
+          next = { ...next, transactions: [...next.transactions, tx] };
+          next = bumpRel(next, fromKind, input.fromId, -sourceAmount, pers);
+          pers.push(["transactions", tx]);
         }
-        next = n2;
-        p2.forEach(([s, r]) => pers.push([s, r]));
+
+        if (input.withdrawal > 0) {
+          const destinationAmount = round(convertAtRates(input.withdrawal, investmentFx, sourceFx), 6);
+          const tx: Tx = {
+            id: uid(), type: "transfer", amount: round(input.withdrawal, 6), currency: acc.currency,
+            fxRate: investmentFx, amountBase: round((input.withdrawal / investmentFx) * baseFx, 6), baseCurrency: d.settings.base,
+            date: txDate, from: { kind: "account", id: input.accountId },
+            legs: [{
+              kind: fromKind, id: input.fromId, amount: destinationAmount,
+              currency: sourceCurrency, fxRate: sourceFx,
+              amountBase: round((destinationAmount / sourceFx) * baseFx, 6), baseCurrency: d.settings.base,
+            }],
+            tagIds: [], memo: `${input.date} 투자 출금`, snapshotId: snap.id, createdAt: Date.now(),
+          };
+          next = { ...next, transactions: [...next.transactions, tx] };
+          // The investment account is already set to the authoritative ending balance above.
+          next = bumpRel(next, fromKind, input.fromId, destinationAmount, pers);
+          pers.push(["transactions", tx]);
+        }
       }
 
-      void prevBal;
-      commit(recordHistory(next), pers);
+      await commit(recordHistory(next), pers, oldSnapshotTxs.map((tx): [StoreName, string] => ["transactions", tx.id]));
     },
     [commit, recordHistory],
   );
@@ -691,39 +964,68 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }) => {
       const d = ref.current;
       if (!d) throw new Error("데이터가 준비되지 않았습니다.");
-      if (input.amount <= 0) throw new Error("금액은 0보다 커야 합니다.");
+      if (![input.amount, input.chipAmount, input.fee, input.date].every(Number.isFinite) ||
+          input.amount <= 0 || input.chipAmount <= 0 || input.fee < 0)
+        throw new Error("금액, 실제 칩 교환액, 수수료 또는 날짜를 확인하세요.");
 
       let sessionId = input.sessionId;
       const pers: Persist = [];
       let next: Data = d;
-
       if (!sessionId) {
         const open = next.casinoSessions.find(
           (s) => s.casinoId === input.casinoId && s.status === "ongoing",
         );
         if (open) sessionId = open.id;
       }
-      if (!sessionId) {
-        const ses: Session = {
+
+      let session = sessionId ? next.casinoSessions.find((s) => s.id === sessionId) : undefined;
+      if (sessionId && !session) throw new Error("카지노 세션을 찾을 수 없습니다.");
+      if (!session) {
+        const sessionFxRate = rateAtTx(d, input.currency, input.date);
+        session = {
           id: uid(),
           casinoId: input.casinoId,
           startedAt: input.date,
           status: "ongoing",
           currency: input.currency,
+          fxRate: sessionFxRate,
           memo: input.memo,
         };
-        sessionId = ses.id;
-        next = { ...next, casinoSessions: [...next.casinoSessions, ses] };
-        pers.push(["casinoSessions", ses]);
+        sessionId = session.id;
+        next = { ...next, casinoSessions: [...next.casinoSessions, session] };
+        pers.push(["casinoSessions", session]);
+      } else if (session.status !== "ongoing") {
+        throw new Error("종료된 세션에는 Buy-in을 추가할 수 없습니다.");
       }
 
+      const sourceExists = input.from.kind === "account"
+        ? d.accounts.some((a) => a.id === input.from.id)
+        : input.from.kind === "cash"
+          ? d.cashLocations.some((a) => a.id === input.from.id)
+          : d.cryptoWallets.some((a) => a.id === input.from.id);
+      if (!sourceExists) throw new Error("Buy-in 출발 자산을 찾을 수 없습니다.");
+      const sourceCurrency = input.from.kind === "crypto"
+        ? "USD"
+        : input.from.kind === "account"
+          ? d.accounts.find((a) => a.id === input.from.id)!.currency
+          : d.cashLocations.find((a) => a.id === input.from.id)!.currency;
+      if (sourceCurrency !== input.currency)
+        throw new Error("Buy-in 금액 통화가 출발 자산 통화와 다릅니다.");
+
+      const fxRate = rateAtTx(d, input.currency, input.date);
+      const sessionFxRate =
+        session.fxRate ??
+        d.casinoBuyIns.find((b) => b.sessionId === sessionId)?.fxRate ??
+        rateAtTx(d, session.currency, session.startedAt);
       const bi: BuyIn = {
         id: uid(),
         sessionId: sessionId!,
         from: input.from,
         amount: round(input.amount, 6),
         currency: input.currency,
-        fxRate: rateOf(d.settings, input.currency),
+        fxRate,
+        sessionAmount: round(toSessionCurrency(input.amount + input.fee, fxRate, sessionFxRate), 6),
+        chipSessionAmount: round(toSessionCurrency(input.chipAmount, fxRate, sessionFxRate), 6),
         chipAmount: round(input.chipAmount, 6),
         fee: round(input.fee, 6),
         date: input.date,
@@ -732,16 +1034,19 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       next = { ...next, casinoBuyIns: [...next.casinoBuyIns, bi] };
       pers.push(["casinoBuyIns", bi]);
 
-      // 출발 자산 차감 (칩은 순자산에 포함하지 않는다)
+      // Crypto Buy-in amounts are USD-denominated. Without historical token pricing,
+      // only USDT can be safely debited 1:1 as USD units.
       if (input.from.kind === "crypto") {
         const symbol = input.symbol ?? "USDT";
+        if (symbol !== "USDT")
+          throw new Error("현재 암호화폐 Buy-in은 1:1 USD로 기록되는 USDT만 지원합니다.");
         next = bumpCrypto(next, input.from.id, symbol, -(input.amount + input.fee), pers);
       } else {
-        assertBalance(next, input.from.kind, input.from.id, input.amount);
-        next = bumpRel(next, input.from.kind, input.from.id, -input.amount, pers);
+        assertBalance(next, input.from.kind, input.from.id, input.amount + input.fee);
+        next = bumpRel(next, input.from.kind, input.from.id, -(input.amount + input.fee), pers);
       }
 
-      commit(recordHistory(next), pers);
+      await commit(recordHistory(next), pers);
       return sessionId!;
     },
     [commit, recordHistory],
@@ -760,11 +1065,55 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }) => {
       const d = ref.current;
       if (!d) throw new Error("데이터가 준비되지 않았습니다.");
-      if (input.legs.length === 0) throw new Error("도착지를 추가하세요.");
-      const sumLegs = input.legs.reduce((s, l) => s + l.amount, 0);
-      if (Math.abs(sumLegs - (input.totalAmount - input.fee)) > 1e-6)
+      const session = d.casinoSessions.find((s) => s.id === input.sessionId);
+      if (!session) throw new Error("카지노 세션을 찾을 수 없습니다.");
+      if (session.status !== "ongoing") throw new Error("종료된 세션에는 Cash-out을 추가할 수 없습니다.");
+      if (input.currency !== session.currency)
+        throw new Error("Cash-out 입력 통화는 세션 기준 통화와 같아야 합니다.");
+      if (![input.totalAmount, input.fee, input.date].every(Number.isFinite) ||
+          input.totalAmount <= 0 || input.fee < 0 || input.fee > input.totalAmount)
+        throw new Error("Cash-out 금액, 수수료 또는 날짜를 확인하세요.");
+      if (!Array.isArray(input.legs) || input.legs.length === 0)
+        throw new Error("도착지를 추가하세요.");
+      const currentSessionTotals = casinoSessionTotals(
+        session.id, d.casinoBuyIns, d.casinoCashOuts, session,
+      );
+      if (input.totalAmount > currentSessionTotals.open + 0.01)
+        throw new Error("Cash-out 금액이 현재 미정산 칩보다 큽니다.");
+
+      const sessionFxRate =
+        session.fxRate ??
+        d.casinoBuyIns.find((b) => b.sessionId === session.id)?.fxRate ??
+        rateAtTx(d, session.currency, session.startedAt);
+      const cashOutFxRate = rateAtTx(d, input.currency, input.date);
+      const enrichedLegs = input.legs.map((leg) => {
+        if (!Number.isFinite(leg.amount) || leg.amount <= 0)
+          throw new Error("도착 금액은 0보다 큰 유효한 숫자여야 합니다.");
+        const destinationExists = leg.kind === "account"
+          ? d.accounts.some((a) => a.id === leg.id)
+          : leg.kind === "cash"
+            ? d.cashLocations.some((a) => a.id === leg.id)
+            : d.cryptoWallets.some((a) => a.id === leg.id);
+        if (!destinationExists) throw new Error("Cash-out 도착 자산을 찾을 수 없습니다.");
+        const currency = leg.kind === "crypto"
+          ? "USD"
+          : leg.kind === "account"
+            ? d.accounts.find((a) => a.id === leg.id)!.currency
+            : d.cashLocations.find((a) => a.id === leg.id)!.currency;
+        const fxRate = rateAtTx(d, currency, input.date);
+        return {
+          ...leg,
+          currency,
+          fxRate,
+          amount: round(leg.amount, 6),
+          amountSession: round(toSessionCurrency(leg.amount, fxRate, sessionFxRate), 6),
+        };
+      });
+      const netSessionAmount = input.totalAmount - input.fee;
+      const destinationSessionAmount = enrichedLegs.reduce((sum, leg) => sum + (leg.amountSession ?? 0), 0);
+      if (Math.abs(netSessionAmount - destinationSessionAmount) > 0.01)
         throw new Error(
-          `도착 합계(${sumLegs})가 실수령액(${input.totalAmount - input.fee})과 다릅니다.`,
+          `도착지 합계(${round(destinationSessionAmount, 6)} ${session.currency})가 실수령액(${round(netSessionAmount, 6)} ${session.currency})과 다릅니다.`,
         );
 
       const co: CashOut = {
@@ -772,19 +1121,21 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         sessionId: input.sessionId,
         totalAmount: round(input.totalAmount, 6),
         currency: input.currency,
-        fxRate: rateOf(d.settings, input.currency),
+        fxRate: cashOutFxRate,
+        sessionAmount: round(toSessionCurrency(input.totalAmount - input.fee, cashOutFxRate, sessionFxRate), 6),
         fee: round(input.fee, 6),
         date: input.date,
         memo: input.memo,
-        legs: input.legs.map((l) => ({ ...l, amount: round(l.amount, 6) })),
+        legs: enrichedLegs,
       };
       const pers: Persist = [["casinoCashOuts", co]];
       let next: Data = { ...d, casinoCashOuts: [...d.casinoCashOuts, co] };
-      input.legs.forEach((l) => {
-        if (l.kind === "crypto") next = bumpCrypto(next, l.id, input.symbol ?? "USDT", l.amount, pers);
-        else next = bumpRel(next, l.kind, l.id, l.amount, pers);
+      enrichedLegs.forEach((leg) => {
+        if (leg.kind === "crypto")
+          next = bumpCrypto(next, leg.id, input.symbol ?? "USDT", leg.amount, pers);
+        else next = bumpRel(next, leg.kind, leg.id, leg.amount, pers);
       });
-      commit(recordHistory(next), pers);
+      await commit(recordHistory(next), pers);
     },
     [commit, recordHistory],
   );
@@ -795,9 +1146,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!d) return { ok: false };
       const ses = d.casinoSessions.find((s) => s.id === id);
       if (!ses) return { ok: false, message: "세션을 찾을 수 없습니다." };
-      const bi = d.casinoBuyIns.filter((b) => b.sessionId === id).reduce((s, b) => s + b.amount, 0);
-      const co = d.casinoCashOuts.filter((c) => c.sessionId === id).reduce((s, c) => s + c.totalAmount, 0);
-      const open = round(bi - co, 6);
+      const open = casinoSessionTotals(id, d.casinoBuyIns, d.casinoCashOuts, ses).open;
+      if (open < -0.01)
+        return { ok: false, message: "Cash-out 금액이 Buy-in 칩 잔액을 초과했습니다. 거래 내역을 확인하세요." };
       if (open > 1e-6 && !force)
         return { ok: false, message: `정산되지 않은 금액 ${open} 이 있습니다. Cash-out을 먼저 기록하세요.` };
 
@@ -806,7 +1157,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         ...d,
         casinoSessions: d.casinoSessions.map((s) => (s.id === id ? row : s)),
       } as Data;
-      commit(recordHistory(next), [["casinoSessions", row]]);
+      await commit(recordHistory(next), [["casinoSessions", row]]);
       return { ok: true };
     },
     [commit, recordHistory],
@@ -827,50 +1178,66 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!d) return;
       const pa = d.propAccounts.find((p) => p.id === input.propAccountId);
       if (!pa) throw new Error("프랍 계정을 찾을 수 없습니다.");
-      if (input.amount <= 0) throw new Error("금액은 0보다 커야 합니다.");
+      if (!Number.isFinite(input.amount) || input.amount <= 0)
+        throw new Error("금액은 0보다 커야 합니다.");
+      if (!Number.isFinite(input.fee) || input.fee < 0 || !Number.isFinite(input.receivedAt))
+        throw new Error("수수료와 지급 날짜를 확인하세요.");
 
+      const target =
+        input.to.kind === "account"
+          ? d.accounts.find((a) => a.id === input.to.id)
+          : d.cashLocations.find((a) => a.id === input.to.id);
+      if (!target) throw new Error("수령 자산을 찾을 수 없습니다.");
+
+      // Fees are entered in USD; convert them using the FX rate effective on receipt date.
+      const payoutFxRate = rateAtTx(d, input.currency, input.receivedAt);
+      const targetFxRate = rateAtTx(d, target.currency, input.receivedAt);
+      const netPayout = netPayoutAfterUsdFee(input.amount, payoutFxRate, input.fee);
+      const baseAmt = toBaseAtTx(d, netPayout, input.currency, input.receivedAt);
+      const credit = round(convertAtRates(netPayout, payoutFxRate, targetFxRate), 6);
+
+      const transactionId = uid();
+      const requestedReduction = Math.min(input.amount, pa.payoutRequested);
       const payout: PropPayout = {
         id: uid(),
         propAccountId: input.propAccountId,
         amount: round(input.amount, 6),
         currency: input.currency,
-        fxRate: rateOf(d.settings, input.currency),
+        fxRate: payoutFxRate,
         receivedAt: input.receivedAt,
         to: input.to,
         fee: round(input.fee, 6),
+        transactionId,
+        requestedReduction: round(requestedReduction, 6),
         memo: input.memo,
       };
 
-      // 수령 자산 통화 기준으로 입금 (내부 환산)
-      const baseAmt = toBase(input.amount, input.currency, d.settings);
-      const target =
-        input.to.kind === "account"
-          ? d.accounts.find((a) => a.id === input.to.id)
-          : d.cashLocations.find((c) => c.id === input.to.id);
-      if (!target) throw new Error("수령 자산을 찾을 수 없습니다.");
-      const credit = baseAmt / rateOf(d.settings, target.currency);
-
       const tx: Tx = {
-        id: uid(),
+        id: transactionId,
         type: "income",
-        amount: round(credit, 6),
+        amount: credit,
         currency: target.currency,
-        fxRate: rateOf(d.settings, target.currency),
-        amountBase: round(baseAmt, 6),
+        fxRate: targetFxRate,
+        amountBase: baseAmt,
+        baseCurrency: d.settings.base,
         date: input.receivedAt,
         accountId: input.to.kind === "account" ? input.to.id : undefined,
         from: input.to.kind === "cash" ? input.to : undefined,
         categoryId: "in-invest",
         tagIds: [],
         counterparty: pa.firm,
-        memo: `${pa.firm} ${pa.alias} 지급${input.memo ? ` · ${input.memo}` : ""}`,
+        memo: pa.firm + " " + pa.alias + " 지급" + (input.memo ? " · " + input.memo : ""),
         createdAt: Date.now(),
       };
-      // 현금 수령이면 legs 로 기록
+      // Cash receipts are represented as a transfer leg with transaction-time FX metadata.
       if (input.to.kind === "cash") {
         tx.type = "transfer";
         tx.from = { kind: "account", id: "prop-clearing" };
-        tx.legs = [{ kind: "cash", id: input.to.id, amount: round(credit, 6) }];
+        tx.legs = [{
+          kind: "cash", id: input.to.id, amount: credit,
+          currency: target.currency, fxRate: targetFxRate,
+          amountBase: baseAmt, baseCurrency: d.settings.base,
+        }];
       }
 
       const pers: Persist = [
@@ -891,7 +1258,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       );
       const paList = next.propAccounts.map((p) =>
         p.id === input.propAccountId
-          ? { ...p, payoutRequested: Math.max(0, round(p.payoutRequested - input.amount, 6)) }
+          ? { ...p, payoutRequested: Math.max(0, round(p.payoutRequested - requestedReduction, 6)) }
           : p,
       );
       next = { ...next, accounts, cashLocations, propAccounts: paList };
@@ -902,7 +1269,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (cashRow) pers.push(["cashLocations", cashRow]);
       pers.push(["propAccounts", paRow]);
 
-      commit(recordHistory(next), pers);
+      await commit(recordHistory(next), pers);
     },
     [commit, recordHistory],
   );
@@ -918,7 +1285,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         backupVersion: 1,
         exportedAt: new Date().toISOString(),
         counts: Object.fromEntries(
-          STORE_LIST.map((s) => [s, ((d as unknown as Record<string, unknown[]>)[s] ?? []).length]),
+          STORE_LIST.map((s) => [
+            s,
+            s === "kv" ? 1 : ((d as unknown as Record<string, unknown[]>)[s] ?? []).length,
+          ]),
         ),
       },
     };
@@ -932,54 +1302,175 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const importJSON = useCallback(
     async (text: string) => {
-      let parsed: Record<string, unknown>;
+      let parsedValue: unknown;
       try {
-        parsed = JSON.parse(text);
+        parsedValue = JSON.parse(text);
       } catch {
         throw new Error("올바른 JSON 파일이 아닙니다.");
       }
-      const meta = parsed.meta as { app?: string; schemaVersion?: number } | undefined;
-      if (!meta || meta.app !== "JalSalAboSe") throw new Error("잘살아보세 백업 파일이 아닙니다.");
-      if (typeof meta.schemaVersion === "number" && meta.schemaVersion > 1)
-        throw new Error("이 앱보다 높은 데이터 버전입니다. 앱을 먼저 업그레이드하세요.");
+      if (!parsedValue || typeof parsedValue !== "object" || Array.isArray(parsedValue))
+        throw new Error("백업의 최상위 구조가 올바르지 않습니다.");
+      const parsed = parsedValue as Record<string, unknown>;
 
-      await clearAll();
-      for (const s of STORE_LIST) {
-        const rows = parsed[s];
-        if (Array.isArray(rows) && rows.length) await putRows(s, rows as { id: string }[]);
+      const meta = parsed.meta as { app?: string; schemaVersion?: number; backupVersion?: number } | undefined;
+      if (!meta || meta.app !== "JalSalAboSe") throw new Error("잘살아보세 백업 파일이 아닙니다.");
+      if (meta.schemaVersion !== 1)
+        throw new Error("지원하지 않는 백업 데이터 버전입니다. 최신 앱에서 다시 내보내세요.");
+      if (meta.backupVersion !== 1)
+        throw new Error("지원하지 않는 백업 파일 버전입니다.");
+
+      const isRecord = (value: unknown): value is Record<string, unknown> =>
+        !!value && typeof value === "object" && !Array.isArray(value);
+      const required: Partial<Record<StoreName, string[]>> = {
+        countries: ["code", "name", "symbol", "sortOrder"],
+        institutions: ["countryId", "name", "kind", "sortOrder"],
+        accountTypes: ["code", "label", "group", "includesInNetWorth"],
+        accounts: ["alias", "accountTypeId", "currency", "openingBalance", "balance"],
+        cashLocations: ["name", "kind", "currency", "openingBalance", "balance"],
+        transactions: ["type", "amount", "currency", "date"],
+        categories: ["kind", "name", "sortOrder"],
+        tags: ["name", "color", "sortOrder"],
+        exchangeRates: ["base", "rate", "effectiveAt", "source"],
+        invSnapshots: ["accountId", "date", "endBalance", "deposit", "withdrawal"],
+        propAccounts: ["firm", "alias", "kind", "nominalSize", "balance", "status"],
+        propPayouts: ["propAccountId", "amount", "currency", "fxRate", "receivedAt", "to", "fee"],
+        cryptoWallets: ["name", "kind", "sortOrder"],
+        cryptoAssets: ["walletId", "symbol", "quantity"],
+        cryptoPrices: ["symbol", "price", "currency", "fetchedAt"],
+        cryptoTx: ["walletId", "type", "symbol", "quantity", "date"],
+        casinos: ["name", "sortOrder"],
+        casinoSessions: ["casinoId", "startedAt", "status", "currency"],
+        casinoBuyIns: ["sessionId", "from", "amount", "currency", "fxRate", "chipAmount", "fee", "date"],
+        casinoCashOuts: ["sessionId", "totalAmount", "currency", "fxRate", "fee", "date", "legs"],
+        nwHistory: ["t", "value", "base"],
+      };
+      const numericFields: Partial<Record<StoreName, string[]>> = {
+        accounts: ["openingBalance", "balance"],
+        cashLocations: ["openingBalance", "balance"],
+        transactions: ["amount", "date"],
+        exchangeRates: ["rate", "effectiveAt"],
+        invSnapshots: ["endBalance", "deposit", "withdrawal"],
+        propAccounts: ["nominalSize", "balance"],
+        propPayouts: ["amount", "fxRate", "receivedAt", "fee"],
+        cryptoAssets: ["quantity"],
+        cryptoPrices: ["price", "fetchedAt"],
+        cryptoTx: ["quantity", "date"],
+        casinoSessions: ["startedAt"],
+        casinoBuyIns: ["amount", "fxRate", "chipAmount", "fee", "date"],
+        casinoCashOuts: ["totalAmount", "fxRate", "fee", "date"],
+        nwHistory: ["t", "value"],
+      };
+
+      const normalized = {} as Record<StoreName, { id: string }[]>;
+      for (const store of STORE_LIST) {
+        const raw = parsed[store];
+        if (!Array.isArray(raw))
+          throw new Error(`백업에 필수 데이터 ${store} 배열이 없거나 올바르지 않습니다. 기존 데이터는 변경되지 않았습니다.`);
+        const rows = raw as unknown[];
+        const seen = new Set<string>();
+        normalized[store] = rows.map((row, index) => {
+          if (!isRecord(row) || typeof row.id !== "string" || !row.id.trim())
+            throw new Error(`${store} ${index + 1}번째 항목의 ID가 올바르지 않습니다.`);
+          if (seen.has(row.id)) throw new Error(`${store}에 중복 ID가 있습니다: ${row.id}`);
+          seen.add(row.id);
+          for (const field of required[store] ?? []) {
+            if (!(field in row) || row[field] === null || row[field] === undefined)
+              throw new Error(`${store} ${row.id} 항목에 필수 값 ${field}이(가) 없습니다.`);
+          }
+          for (const field of numericFields[store] ?? []) {
+            if (typeof row[field] !== "number" || !Number.isFinite(row[field] as number))
+              throw new Error(`${store} ${row.id} 항목의 ${field} 값이 숫자가 아닙니다.`);
+          }
+          if (store === "transactions" && row.tagIds === undefined) row.tagIds = [];
+          if (store === "casinoCashOuts") {
+            if (!Array.isArray(row.legs) || row.legs.some((leg) =>
+              !isRecord(leg) || typeof leg.id !== "string" ||
+              typeof leg.kind !== "string" || typeof leg.amount !== "number" ||
+              !Number.isFinite(leg.amount)
+            )) throw new Error(`casinoCashOuts ${row.id}의 도착 자산 목록이 올바르지 않습니다.`);
+          }
+          if (store === "casinoBuyIns" && !isRecord(row.from))
+            throw new Error(`casinoBuyIns ${row.id}의 출발 자산 정보가 올바르지 않습니다.`);
+          return row as { id: string };
+        });
       }
-      const fresh = Object.fromEntries(
-        STORE_LIST.map((s) => [s, []]),
-      ) as unknown as Record<StoreName, never[]>;
-      const settings = (parsed.kv as Settings[] | undefined)?.[0] ?? DEFAULT_SETTINGS;
-      const rebuilt = { ...fresh, settings } as unknown as Data;
-      // 전체 재로드
-      const rows2 = await Promise.all(STORE_LIST.map((s) => allRows<never>(s)));
-      const map = Object.fromEntries(STORE_LIST.map((s, i) => [s, rows2[i]])) as unknown as Record<
-        StoreName,
-        never[]
-      >;
-      const merged = { ...(rebuilt as unknown as Record<string, unknown>), ...map } as unknown as Data;
-      ref.current = merged;
-      setData(merged);
-      void settings;
+
+      if (normalized.kv.length !== 1)
+        throw new Error("백업에 설정 데이터가 정확히 하나 포함되어야 합니다.");
+      const settingsRow = normalized.kv[0] as (Settings & { id: string }) | undefined;
+      if (settingsRow && settingsRow.id !== "settings")
+        throw new Error("설정 데이터 ID가 올바르지 않습니다.");
+      const rawRates = settingsRow?.rates;
+      if (rawRates !== undefined && !isRecord(rawRates))
+        throw new Error("설정의 환율 정보가 올바르지 않습니다.");
+      const settings = {
+        ...DEFAULT_SETTINGS,
+        ...(settingsRow ?? {}),
+        rates: { ...DEFAULT_SETTINGS.rates, ...(isRecord(rawRates) ? rawRates : {}) },
+      } as Settings;
+      if (!["USD", "KRW", "KHR"].includes(settings.base))
+        throw new Error("지원하지 않는 기준 통화입니다.");
+      const supportedCurrencies = new Set(["USD", "KRW", "KHR"]);
+      const currencyFields: Partial<Record<StoreName, string[]>> = {
+        accounts: ["currency"],
+        cashLocations: ["currency"],
+        transactions: ["currency"],
+        exchangeRates: ["base"],
+        propAccounts: ["feeCurrency", "payoutCurrency"],
+        propPayouts: ["currency"],
+        cryptoPrices: ["currency"],
+        casinoSessions: ["currency"],
+        casinoBuyIns: ["currency"],
+        casinoCashOuts: ["currency"],
+      };
+      for (const store of STORE_LIST) {
+        for (const row of normalized[store]) {
+          for (const field of currencyFields[store] ?? []) {
+            const currency = (row as Record<string, unknown>)[field];
+            if (typeof currency === "string" && !supportedCurrencies.has(currency))
+              throw new Error(`${store} ${row.id} 항목의 통화 ${currency}는 지원하지 않습니다.`);
+          }
+          if (store === "casinoCashOuts") {
+            const legs = (row as Record<string, unknown>).legs;
+            if (Array.isArray(legs)) for (const leg of legs) {
+              if (isRecord(leg) && typeof leg.currency === "string" && !supportedCurrencies.has(leg.currency))
+                throw new Error(`casinoCashOuts ${row.id}의 도착 통화가 지원되지 않습니다.`);
+            }
+          }
+        }
+      }
+      Object.entries(settings.rates).forEach(([currency, rate]) => {
+        if (!supportedCurrencies.has(currency) ||
+            typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0 ||
+            (currency === "USD" && rate !== 1))
+          throw new Error(`${currency} 환율 설정이 올바르지 않습니다.`);
+      });
+      normalized.kv = [{ id: "settings", ...settings }];
+
+      // A single IndexedDB transaction clears and rewrites every store.
+      // If any write fails, IndexedDB rolls the entire transaction back.
+      const tables = Object.fromEntries(
+        STORE_LIST.filter((store) => store !== "kv").map((store) => [store, normalized[store]]),
+      );
+      const merged = { ...tables, settings } as unknown as Data;
+      await replaceAllAndPublish(normalized, merged);
     },
-    [],
+    [replaceAllAndPublish],
   );
 
   const resetAll = useCallback(async () => {
-    await clearAll();
     const s = seed();
-    await putRows("countries", s.countries);
-    await putRows("institutions", s.institutions);
-    await putRows("accountTypes", s.accountTypes);
-    await putRows("categories", s.categories);
-    await putRows("exchangeRates", s.exchangeRates);
-    await putRow("kv", s.settings as unknown as { id: string });
     const fresh = { ...(s as unknown as Data), ...emptyTables() } as Data;
-    ref.current = fresh;
-    setData(fresh);
-  }, []);
+    const rowsByStore = Object.fromEntries(
+      STORE_LIST.map((store) => [
+        store,
+        store === "kv"
+          ? [{ id: "settings", ...fresh.settings }]
+          : ((fresh as unknown as Record<string, { id: string }[]>)[store] ?? []),
+      ]),
+    ) as Record<StoreName, { id: string }[]>;
+    await replaceAllAndPublish(rowsByStore, fresh);
+  }, [replaceAllAndPublish]);
 
   /* ── 샘플 데이터 (사용자가 직접 생성 · 삭제 가능) ── */
   const loadSample = useCallback(async () => {
@@ -1071,8 +1562,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         type: isIncome ? "income" : "expense",
         amount,
         currency: a.currency,
-        fxRate: rateOf(d.settings, a.currency),
-        amountBase: toBase(amount, a.currency, d.settings),
+        fxRate: rateAtTx(d, a.currency, date),
+        amountBase: toBaseAtTx(d, amount, a.currency, date),
+        baseCurrency: d.settings.base,
         date,
         accountId: a.id,
         categoryId: category?.id,
@@ -1101,14 +1593,17 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       settings: { ...d.settings, sampleLoaded: true },
       nwHistory: [],
     };
-    await clearStore("nwHistory"); // 기존 이력과 섞이지 않도록 초기화
     const withHist = recordHistory({ ...next, nwHistory: [] });
-    commit(withHist);
-    STORE_LIST.forEach((s) => {
-      const rows = (withHist as unknown as Record<string, { id: string }[]>)[s];
-      if (Array.isArray(rows) && rows.length) putRows(s, rows).catch(() => undefined);
-    });
-  }, [commit, recordHistory]);
+    const rowsByStore = Object.fromEntries(
+      STORE_LIST.map((store) => [
+        store,
+        store === "kv"
+          ? [{ id: "settings", ...withHist.settings }]
+          : ((withHist as unknown as Record<string, { id: string }[]>)[store] ?? []),
+      ]),
+    ) as Record<StoreName, { id: string }[]>;
+    await replaceAllAndPublish(rowsByStore, withHist);
+  }, [commit, recordHistory, replaceAllAndPublish]);
 
   const value = useMemo<StoreValue | null>(() => {
     if (!data) return null;
@@ -1121,6 +1616,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       nw,
       save,
       remove,
+      removeTransaction,
       setSettings,
       applyTx,
       setBalance,
@@ -1139,6 +1635,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     error,
     save,
     remove,
+    removeTransaction,
     setSettings,
     applyTx,
     setBalance,
