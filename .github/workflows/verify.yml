@@ -1,4 +1,4 @@
-name: Verify and build Android APK
+name: Verify app and optionally build Android APK
 
 on:
   push:
