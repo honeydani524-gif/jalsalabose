@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   convertAtRates,
   investmentTradePnl,
+  netPayoutAfterUsdFee,
   rateAt,
   toSessionCurrency,
   transferDifference,
@@ -42,5 +43,20 @@ describe("historical rate lookup", () => {
     expect(rateAt("KHR", 250, history, { KHR: 9999 })).toBe(4100);
     expect(rateAt("KHR", 150, history, { KHR: 9999 })).toBe(4000);
     expect(rateAt("KHR", 50, history, { KHR: 9999 })).toBe(9999);
+  });
+});
+
+describe("prop payout net receipt", () => {
+  it("subtracts a USD fee after converting it at the payout-date FX rate", () => {
+    // 1 USD = 4,000 KHR; a $2 fee reduces a 500,000 KHR gross payout by 8,000 KHR.
+    expect(netPayoutAfterUsdFee(500_000, 4_000, 2)).toBe(492_000);
+  });
+
+  it("rejects fees that consume the entire payout", () => {
+    expect(() => netPayoutAfterUsdFee(8_000, 4_000, 2)).toThrow();
+  });
+
+  it("rejects negative or invalid fee inputs", () => {
+    expect(() => netPayoutAfterUsdFee(100, 4_000, -1)).toThrow();
   });
 });
