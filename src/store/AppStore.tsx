@@ -667,6 +667,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     async (input: TxInput) => {
       const d = ref.current;
       if (!d) return;
+      if (!Number.isFinite(input.amount) || !Number.isFinite(input.date))
+        throw new Error("거래 금액과 날짜는 유효한 숫자여야 합니다.");
       if (input.type === "income" || input.type === "expense") {
         if (!input.accountId) throw new Error("계좌를 선택하세요.");
         if (input.amount <= 0) throw new Error("금액은 0보다 커야 합니다.");
@@ -684,7 +686,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         const legs = input.legs ?? [];
         if (legs.length === 0) throw new Error("도착 자산을 추가하세요.");
         normalizedLegs = legs.map((leg) => {
-          if (leg.amount <= 0) throw new Error("도착 금액은 0보다 커야 합니다.");
+          if (!Number.isFinite(leg.amount) || leg.amount <= 0)
+            throw new Error("도착 금액은 0보다 큰 유효한 숫자여야 합니다.");
           const destination = leg.kind === "account"
             ? d.accounts.find((a) => a.id === leg.id)
             : d.cashLocations.find((a) => a.id === leg.id);
@@ -762,6 +765,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     async (kind: "account" | "cash", id: string, next: number, reason: string) => {
       const d = ref.current;
       if (!d) return;
+      if (!Number.isFinite(next)) throw new Error("새 잔액은 유효한 숫자여야 합니다.");
       const row = kind === "account" ? d.accounts.find((a) => a.id === id) : d.cashLocations.find((c) => c.id === id);
       if (!row) return;
       const delta = round(next - row.balance, 6);
@@ -807,6 +811,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!d) return;
       const acc = d.accounts.find((a) => a.id === input.accountId);
       if (!acc) throw new Error("계좌를 찾을 수 없습니다.");
+      if (![input.endBalance, input.deposit, input.withdrawal].every(Number.isFinite) ||
+          !/^\d{4}-\d{2}-\d{2}$/.test(input.date) ||
+          Number.isNaN(new Date(`${input.date}T12:00:00`).getTime()))
+        throw new Error("평가 날짜와 금액을 확인하세요.");
       if (input.endBalance < 0 || input.deposit < 0 || input.withdrawal < 0)
         throw new Error("잔액과 입출금은 음수일 수 없습니다.");
       if (input.fromId && input.fromKind === undefined)
@@ -956,7 +964,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }) => {
       const d = ref.current;
       if (!d) throw new Error("데이터가 준비되지 않았습니다.");
-      if (input.amount <= 0 || input.chipAmount <= 0 || input.fee < 0) throw new Error("금액, 실제 칩 교환액 또는 수수료를 확인하세요.");
+      if (![input.amount, input.chipAmount, input.fee, input.date].every(Number.isFinite) ||
+          input.amount <= 0 || input.chipAmount <= 0 || input.fee < 0)
+        throw new Error("금액, 실제 칩 교환액, 수수료 또는 날짜를 확인하세요.");
 
       let sessionId = input.sessionId;
       const pers: Persist = [];
@@ -1060,9 +1070,11 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (session.status !== "ongoing") throw new Error("종료된 세션에는 Cash-out을 추가할 수 없습니다.");
       if (input.currency !== session.currency)
         throw new Error("Cash-out 입력 통화는 세션 기준 통화와 같아야 합니다.");
-      if (input.totalAmount <= 0 || input.fee < 0 || input.fee > input.totalAmount)
-        throw new Error("Cash-out 금액 또는 수수료를 확인하세요.");
-      if (input.legs.length === 0) throw new Error("도착지를 추가하세요.");
+      if (![input.totalAmount, input.fee, input.date].every(Number.isFinite) ||
+          input.totalAmount <= 0 || input.fee < 0 || input.fee > input.totalAmount)
+        throw new Error("Cash-out 금액, 수수료 또는 날짜를 확인하세요.");
+      if (!Array.isArray(input.legs) || input.legs.length === 0)
+        throw new Error("도착지를 추가하세요.");
       const currentSessionTotals = casinoSessionTotals(
         session.id, d.casinoBuyIns, d.casinoCashOuts, session,
       );
@@ -1075,7 +1087,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         rateAtTx(d, session.currency, session.startedAt);
       const cashOutFxRate = rateAtTx(d, input.currency, input.date);
       const enrichedLegs = input.legs.map((leg) => {
-        if (leg.amount <= 0) throw new Error("도착 금액은 0보다 커야 합니다.");
+        if (!Number.isFinite(leg.amount) || leg.amount <= 0)
+          throw new Error("도착 금액은 0보다 큰 유효한 숫자여야 합니다.");
         const destinationExists = leg.kind === "account"
           ? d.accounts.some((a) => a.id === leg.id)
           : leg.kind === "cash"
@@ -1167,8 +1180,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!pa) throw new Error("프랍 계정을 찾을 수 없습니다.");
       if (!Number.isFinite(input.amount) || input.amount <= 0)
         throw new Error("금액은 0보다 커야 합니다.");
-      if (!Number.isFinite(input.fee) || input.fee < 0)
-        throw new Error("수수료는 0 이상의 숫자여야 합니다.");
+      if (!Number.isFinite(input.fee) || input.fee < 0 || !Number.isFinite(input.receivedAt))
+        throw new Error("수수료와 지급 날짜를 확인하세요.");
 
       const target =
         input.to.kind === "account"
