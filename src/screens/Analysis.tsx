@@ -127,11 +127,15 @@ export function AnalysisScreen() {
     () =>
       data.casinos.map((c) => {
         const ids = new Set(data.casinoSessions.filter((x) => x.casinoId === c.id).map((x) => x.id));
-        const ins = sum(data.casinoBuyIns.filter((b) => ids.has(b.sessionId)).map((b) => toBase(b.amount, b.currency, s)));
-        const outs = sum(data.casinoCashOuts.filter((o) => ids.has(o.sessionId)).map((o) => toBase(o.totalAmount, o.currency, s)));
+        const ins = sum(data.casinoBuyIns.filter((b) => ids.has(b.sessionId)).map((b) =>
+          amountAtBaseCurrency(b.amount + (b.fee || 0), b.currency, b.fxRate, b.date, s.base, data.exchangeRates, s.rates),
+        ));
+        const outs = sum(data.casinoCashOuts.filter((o) => ids.has(o.sessionId)).map((o) =>
+          amountAtBaseCurrency(o.totalAmount - (o.fee || 0), o.currency, o.fxRate, o.date, s.base, data.exchangeRates, s.rates),
+        ));
         return { name: c.name, visits: ids.size, pnl: round(outs - ins, 6) };
       }),
-    [data.casinos, data.casinoSessions, data.casinoBuyIns, data.casinoCashOuts, s],
+    [data.casinos, data.casinoSessions, data.casinoBuyIns, data.casinoCashOuts, data.exchangeRates, s],
   );
 
   const topTags = useMemo(() => {
@@ -288,7 +292,7 @@ export function AnalysisScreen() {
           )}
           <div className="mt-3 rounded-xl bg-[#fef4e6] px-3 py-2 font-mono text-[11.5px] text-ink/70">
             실제 지급 수익 합계{" "}
-            <b>{fmtAmount(sum(data.propPayouts.map((x) => toBase(x.amount, x.currency, s))), s.base)}</b> (수령 계좌에 반영됨)
+            <b>{fmtAmount(sum(data.propPayouts.map((x) => amountAtBaseCurrency(x.amount, x.currency, x.fxRate, x.receivedAt, s.base, data.exchangeRates, s.rates))), s.base)}</b> (수령 계좌에 반영됨)
           </div>
         </Card>
 
@@ -434,7 +438,9 @@ export function AIScreen() {
       data.propAccounts.forEach((p) => {
         L.push(`- ${p.firm} ${p.alias}: 명목 $${p.nominalSize.toLocaleString()}, 평가잔액 $${p.balance.toLocaleString()} (${fmtPct(p.opening ? (p.balance - p.opening) / p.opening : 0)}), 상태 ${p.status}, 목표 $${(p.target ?? 0).toLocaleString()}, 일한 최대 손실 한도 $${(p.maxDailyLoss ?? 0).toLocaleString()}`);
       });
-      const paid = sum(data.propPayouts.filter((p) => p.receivedAt >= from).map((p) => toBase(p.amount, p.currency, s)));
+      const paid = sum(data.propPayouts.filter((p) => p.receivedAt >= from).map((p) =>
+        amountAtBaseCurrency(p.amount, p.currency, p.fxRate, p.receivedAt, s.base, data.exchangeRates, s.rates),
+      ));
       L.push(`- 기간 내 실제 지급받은 수익: ${fmt(paid)} (이것만 실제 자산에 반영됨)`);
       L.push(`- 미수령 가능 금액: ${fmt(sum(data.propAccounts.map((p) => p.payoutRequested)))} (순자산에서 제외)`);
       L.push("");
@@ -459,8 +465,12 @@ export function AIScreen() {
       if (data.casinos.length === 0) L.push(`- 데이터 부족: 카지노 기록 없음`);
       data.casinos.forEach((c, i) => {
         const ids = new Set(data.casinoSessions.filter((x) => x.casinoId === c.id).map((x) => x.id));
-        const bi = sum(data.casinoBuyIns.filter((b) => ids.has(b.sessionId)).map((b) => toBase(b.amount, b.currency, s)));
-        const co = sum(data.casinoCashOuts.filter((o) => ids.has(o.sessionId)).map((o) => toBase(o.totalAmount, o.currency, s)));
+        const bi = sum(data.casinoBuyIns.filter((b) => ids.has(b.sessionId)).map((b) =>
+          amountAtBaseCurrency(b.amount + (b.fee || 0), b.currency, b.fxRate, b.date, s.base, data.exchangeRates, s.rates),
+        ));
+        const co = sum(data.casinoCashOuts.filter((o) => ids.has(o.sessionId)).map((o) =>
+          amountAtBaseCurrency(o.totalAmount - (o.fee || 0), o.currency, o.fxRate, o.date, s.base, data.exchangeRates, s.rates),
+        ));
         L.push(`- ${casinoName(c.name, i)}: 방문 ${ids.size}회, Buy-in ${fmt(bi)}, Cash-out ${fmt(co)}, 손익 ${fmt(co - bi)}`);
       });
       const ongoing = data.casinoSessions.filter((x) => x.status === "ongoing").length;
