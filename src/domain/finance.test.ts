@@ -35,6 +35,12 @@ describe("transaction-time FX calculations", () => {
 });
 
 describe("historical rate lookup", () => {
+  it("rejects missing or invalid rates instead of silently treating unknown currencies as USD", () => {
+    expect(() => rateAt("EUR", 250, [], { KHR: 4000 })).toThrow(/환율이 없습니다/);
+    expect(() => rateAt("EUR", 250, [], { EUR: 0 })).toThrow(/환율이 없습니다/);
+    expect(rateAt("USD", 250, [], {})).toBe(1);
+  });
+
   it("uses the latest rate effective on or before the transaction date", () => {
     const history = [
       { base: "KHR", rate: 4000, effectiveAt: 100 },
