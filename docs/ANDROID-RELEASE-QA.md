@@ -14,7 +14,10 @@ Use this checklist against the latest APK artifact produced by the GitHub Action
 
 - [ ] Install APK on a clean Android device
 - [ ] Launch the app and confirm the dashboard loads without errors
-- [ ] Create, edit, and delete a normal transaction; restart the app and verify persistence
+- [ ] Create and delete income/expense transactions; verify the linked account balance is reversed exactly
+- [ ] Create and delete a multi-destination transfer; verify source and every destination balance are restored
+- [ ] Confirm snapshot-generated transactions cannot be deleted independently
+- [ ] Restart the app and verify persistence
 - [ ] Record a cross-currency transfer and verify both sides and historical FX details
 - [ ] Create an investment snapshot with both deposit and withdrawal flows; edit it and verify every source/destination balance
 - [ ] Create a casino session, Buy-in, and Cash-out; verify fees, session currency, and open chips
