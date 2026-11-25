@@ -171,10 +171,12 @@ function SessionDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const casino = data.casinos.find((c) => c.id === ses.casinoId);
   const bi = data.casinoBuyIns.filter((b) => b.sessionId === id).sort((a, b) => a.date - b.date);
   const co = data.casinoCashOuts.filter((c) => c.sessionId === id).sort((a, b) => a.date - b.date);
-  const totalIn = bi.reduce((s, b) => s + b.amount, 0);
-  const totalOut = co.reduce((s, c) => s + c.totalAmount, 0);
+  const sessionTotals = casinoSessionTotals(id, data.casinoBuyIns, data.casinoCashOuts);
+  const totalIn = sessionTotals.buyIn;
+  const totalOut = sessionTotals.cashOut;
   const pnl = round(totalOut - totalIn, 6);
-  const open = round(totalIn - totalOut, 6);
+  const open = sessionTotals.open;
+  const sessionFxRate = ses.fxRate ?? bi[0]?.fxRate ?? 1;
   const ongoing = ses.status === "ongoing";
   const currency = ses.currency;
 
@@ -240,8 +242,16 @@ function SessionDetail({ id, onClose }: { id: string; onClose: () => void }) {
 
         <div>
           <p className="mb-1.5 font-mono text-[11.5px] uppercase tracking-wider text-muted">거래 흐름</p>
-          {[...bi.map((b) => ({ k: "in" as const, d: b.date, amt: b.amount, from: relName(b.from.kind, b.from.id), memo: b.memo })),
-            ...co.map((c) => ({ k: "out" as const, d: c.date, amt: c.totalAmount, from: c.legs.map((l) => relName(l.kind, l.id)).join(" + "), memo: c.memo }))]
+          {[...bi.map((b) => ({
+              k: "in" as const, d: b.date,
+              amt: b.sessionAmount ?? toSessionCurrency(b.amount, b.fxRate || sessionFxRate, sessionFxRate),
+              from: relName(b.from.kind, b.from.id), memo: b.memo,
+            })),
+            ...co.map((x) => ({
+              k: "out" as const, d: x.date,
+              amt: x.sessionAmount ?? toSessionCurrency(x.totalAmount, x.fxRate || sessionFxRate, sessionFxRate),
+              from: x.legs.map((l) => relName(l.kind, l.id)).join(" + "), memo: x.memo,
+            }))]
             .sort((a, b) => b.d - a.d)
             .map((x, i) => (
               <Row
@@ -342,8 +352,9 @@ export default function CasinoScreen() {
         const ids = new Set(sessions.map((s) => s.id));
         const ins = data.casinoBuyIns.filter((b) => ids.has(b.sessionId));
         const outs = data.casinoCashOuts.filter((o) => ids.has(o.sessionId));
-        const totalIn = ins.reduce((s, b) => s + toBase(b.amount, b.currency, data.settings), 0);
-        const totalOut = outs.reduce((s, o) => s + toBase(o.totalAmount, o.currency, data.settings), 0);
+        const usdToBase = toBase(1, "USD", data.settings);
+        const totalIn = ins.reduce((s, b) => s + b.amount / (b.fxRate || 1), 0) * usdToBase;
+        const totalOut = outs.reduce((s, o) => s + o.totalAmount / (o.fxRate || 1), 0) * usdToBase;
         return {
           c,
           visits: sessions.length,
@@ -385,8 +396,9 @@ export default function CasinoScreen() {
           </p>
           <div className="grid gap-2 sm:grid-cols-2">
             {ongoingSessions.map((s) => {
-              const bi = data.casinoBuyIns.filter((b) => b.sessionId === s.id).reduce((a, b) => a + b.amount, 0);
-              const co = data.casinoCashOuts.filter((c) => c.sessionId === s.id).reduce((a, c) => a + c.totalAmount, 0);
+              const totals = casinoSessionTotals(s.id, data.casinoBuyIns, data.casinoCashOuts);
+              const bi = totals.buyIn;
+              const co = totals.cashOut;
               return (
                 <button key={s.id} onClick={() => setDetail(s.id)} className="cursor-pointer rounded-xl border border-warn/40 bg-white px-3.5 py-3 text-left transition hover:border-warn">
                   <p className="text-[14.5px] font-bold text-ink">{data.casinos.find((c) => c.id === s.casinoId)?.name}</p>
@@ -494,8 +506,9 @@ export default function CasinoScreen() {
           ) : (
             <Card pad={false} className="overflow-hidden p-4 md:p-5">
               {[...data.casinoSessions].sort((a, b) => b.startedAt - a.startedAt).map((s) => {
-                const bi = data.casinoBuyIns.filter((b) => b.sessionId === s.id).reduce((a, b) => a + b.amount, 0);
-                const co = data.casinoCashOuts.filter((c) => c.sessionId === s.id).reduce((a, c) => a + c.totalAmount, 0);
+                const totals = casinoSessionTotals(s.id, data.casinoBuyIns, data.casinoCashOuts);
+                const bi = totals.buyIn;
+                const co = totals.cashOut;
                 return (
                   <Row
                     key={s.id}
