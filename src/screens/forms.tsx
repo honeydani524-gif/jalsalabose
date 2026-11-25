@@ -236,7 +236,7 @@ function TransferForm({ onClose }: { onClose: () => void }) {
       : data.cashLocations.find((c) => c.id === from.id)
     : undefined;
   const currency = fromRow?.currency ?? "USD";
-  const txTimestamp = toTs(date);
+  const txTimestamp = date === todayISO() ? Date.now() : toTs(date);
   const rateAt = (cur: string) => historicalRateAt(cur, txTimestamp, data.exchangeRates, data.settings.rates);
   const legCurrency = (leg: (typeof legs)[number]) =>
     leg.kind === "account"
