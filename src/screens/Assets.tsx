@@ -20,6 +20,7 @@ import {
 } from "../ui/kit";
 import { fmtAmount, fmtDate, fmtPct, round, toBase } from "../domain/calc";
 import { uid } from "../data/db";
+import { amountAtBaseCurrency } from "../domain/finance";
 
 type Tab = "account" | "cash" | "crypto" | "prop";
 
@@ -310,7 +311,10 @@ function BalanceDetail({ kind, id, onClose }: { kind: "account" | "cash"; id: st
                 sub={fmtDate(t.date)}
                 right={
                   <span className="font-mono text-[13.5px] tnum">
-                    <Money v={t.amountBase} settings={data.settings} signed={t.type === "adjust"} />
+                    <Money v={amountAtBaseCurrency(
+                      t.amount, t.currency, t.fxRate, t.date, data.settings.base,
+                      data.exchangeRates, data.settings.rates, t.amountBase, t.baseCurrency,
+                    )} settings={data.settings} signed={t.type === "adjust"} />
                   </span>
                 }
               />
