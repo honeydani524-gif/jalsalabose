@@ -444,6 +444,20 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           throw new Error("거래·투자·카지노·프랍 기록에서 사용 중인 자산은 삭제할 수 없습니다. 보관 처리해 주세요.");
         }
       }
+      if (store === "cryptoWallets") {
+        const referenced =
+          d.cryptoAssets.some((asset) => asset.walletId === id) ||
+          d.cryptoTx.some((tx) =>
+            tx.walletId === id || tx.fromWalletId === id || tx.toWalletId === id
+          ) ||
+          d.casinoBuyIns.some((buyIn) => buyIn.from.kind === "crypto" && buyIn.from.id === id);
+        if (referenced)
+          throw new Error("코인 잔액 또는 거래·카지노 기록에서 사용 중인 지갑은 삭제할 수 없습니다.");
+      }
+      if (store === "propAccounts" && d.propPayouts.some((payout) => payout.propAccountId === id))
+        throw new Error("지급 기록이 연결된 프랍 계정은 삭제할 수 없습니다.");
+      if (store === "casinos" && d.casinoSessions.some((session) => session.casinoId === id))
+        throw new Error("세션 기록이 연결된 카지노는 삭제할 수 없습니다.");
       const list = (d as unknown as Record<StoreName, { id: string }[]>)[store] ?? [];
       const next = { ...d, [store]: list.filter((r) => r.id !== id) } as Data;
       await commit(recordHistory(next), [], [[store, id]]);
