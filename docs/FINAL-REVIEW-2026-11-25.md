@@ -26,22 +26,21 @@
 | APK workflow | Routine code review previously generated a debug APK. | Keep push/PR checks to tests, type checking, and web build; gate APK packaging behind manual `workflow_dispatch` input. |
 | GitHub PR target | PR #1 targeted `main` instead of the intended audit baseline. | Retarget PR #1 to `audit/phase-1-baseline`; `main` was not modified. |
 | Documentation and metadata | README and package-lock metadata were stale. | Align package-lock root version and refresh README/build/QA instructions. |
+| GitHub Actions runtime | Older action major versions emitted Node 20 deprecation warnings on current runners. | Upgrade checkout/setup-node/setup-java/upload-artifact to current major releases; pin Android setup-android to v4.0.4. |
 
 ## Latest automated verification
 
-The latest code verification completed successfully at commit `7bc3dac31b6b2198077cdbedde27f0a0e99c5e3c`.
+Application code and the current CI workflow passed at commit `8817968dd0971ec2d93f6728a4c3ec3ef9e49029`.
 
-- GitHub Actions push run: [45593912117](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45593912117)
-- GitHub Actions pull request run: [45593922888](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45593922888)
+- GitHub Actions push run: [45595326367](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45595326367)
+- GitHub Actions pull request run: [45595336996](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45595336996)
 - `npm ci`: passed
 - Financial regression tests: passed
 - TypeScript check: passed
 - Vite production build: passed
-- Android APK job: skipped by design
+- Android APK job: skipped by design; no APK artifact was created by these runs
 
-A later code-review pass added balance-aware transaction deletion and historical transaction display conversion across base-currency changes. These changes are being re-verified by the current workflow run.
-
-This verification does not certify Android installation or physical-device behavior.
+The test step includes regression coverage for historical FX display after base-currency changes, casino backdated Buy-ins, transaction balance reversals, and prop payout reversal. This automated verification does not certify Android installation or physical-device behavior.
 
 ## Remaining checks before release
 
