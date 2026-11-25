@@ -303,8 +303,15 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<Data | null>(null);
   const histLock = useRef(false);
+  const commitBusy = useRef(false);
 
   const commit = useCallback(async (next: Data, persist: Persist = [], deletes: [StoreName, string][] = []) => {
+    if (commitBusy.current) {
+      const message = "다른 저장 작업이 진행 중입니다. 잠시 후 다시 시도하세요.";
+      setError(message);
+      throw new Error(message);
+    }
+    commitBusy.current = true;
     const previous = ref.current;
     const writes: [StoreName, { id: string }][] = persist.flatMap(([store, row]) =>
       row ? [[store, row] as [StoreName, { id: string }]] : [],
@@ -325,6 +332,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     } catch (e) {
       setError(String((e as Error)?.message ?? e));
       throw e;
+    } finally {
+      commitBusy.current = false;
     }
   }, []);
 
