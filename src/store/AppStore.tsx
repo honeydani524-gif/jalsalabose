@@ -864,9 +864,12 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       next = { ...next, casinoBuyIns: [...next.casinoBuyIns, bi] };
       pers.push(["casinoBuyIns", bi]);
 
-      // Deduct from the source asset. Crypto Buy-ins are denominated in USD/USDT.
+      // Crypto Buy-in amounts are USD-denominated. Without historical token pricing,
+      // only USDT can be safely debited 1:1 as USD units.
       if (input.from.kind === "crypto") {
         const symbol = input.symbol ?? "USDT";
+        if (symbol !== "USDT")
+          throw new Error("현재 암호화폐 Buy-in은 1:1 USD로 기록되는 USDT만 지원합니다.");
         next = bumpCrypto(next, input.from.id, symbol, -(input.amount + input.fee), pers);
       } else {
         assertBalance(next, input.from.kind, input.from.id, input.amount + input.fee);
@@ -1002,50 +1005,64 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!d) return;
       const pa = d.propAccounts.find((p) => p.id === input.propAccountId);
       if (!pa) throw new Error("프랍 계정을 찾을 수 없습니다.");
-      if (input.amount <= 0) throw new Error("금액은 0보다 커야 합니다.");
+      if (!Number.isFinite(input.amount) || input.amount <= 0)
+        throw new Error("금액은 0보다 커야 합니다.");
+      if (!Number.isFinite(input.fee) || input.fee < 0)
+        throw new Error("수수료는 0 이상의 숫자여야 합니다.");
+
+      const target =
+        input.to.kind === "account"
+          ? d.accounts.find((a) => a.id === input.to.id)
+          : d.cashLocations.find((a) => a.id === input.to.id);
+      if (!target) throw new Error("수령 자산을 찾을 수 없습니다.");
+
+      // Fees are entered in USD; convert them using the FX rate effective on receipt date.
+      const payoutFxRate = rateAtTx(d, input.currency, input.receivedAt);
+      const targetFxRate = rateAtTx(d, target.currency, input.receivedAt);
+      const netPayout = input.amount - input.fee * payoutFxRate;
+      if (netPayout <= 0)
+        throw new Error("USD 수수료를 차감한 실제 지급액은 0보다 커야 합니다.");
+      const baseAmt = toBaseAtTx(d, netPayout, input.currency, input.receivedAt);
+      const credit = round(convertAtRates(netPayout, payoutFxRate, targetFxRate), 6);
 
       const payout: PropPayout = {
         id: uid(),
         propAccountId: input.propAccountId,
         amount: round(input.amount, 6),
         currency: input.currency,
-        fxRate: rateOf(d.settings, input.currency),
+        fxRate: payoutFxRate,
         receivedAt: input.receivedAt,
         to: input.to,
         fee: round(input.fee, 6),
         memo: input.memo,
       };
 
-      // 수령 자산 통화 기준으로 입금 (내부 환산)
-      const baseAmt = toBase(input.amount, input.currency, d.settings);
-      const target =
-        input.to.kind === "account"
-          ? d.accounts.find((a) => a.id === input.to.id)
-          : d.cashLocations.find((c) => c.id === input.to.id);
-      if (!target) throw new Error("수령 자산을 찾을 수 없습니다.");
-      const credit = baseAmt / rateOf(d.settings, target.currency);
-
       const tx: Tx = {
         id: uid(),
         type: "income",
-        amount: round(credit, 6),
+        amount: credit,
         currency: target.currency,
-        fxRate: rateOf(d.settings, target.currency),
-        amountBase: round(baseAmt, 6),
+        fxRate: targetFxRate,
+        amountBase: baseAmt,
+        baseCurrency: d.settings.base,
         date: input.receivedAt,
         accountId: input.to.kind === "account" ? input.to.id : undefined,
         from: input.to.kind === "cash" ? input.to : undefined,
         categoryId: "in-invest",
         tagIds: [],
         counterparty: pa.firm,
-        memo: `${pa.firm} ${pa.alias} 지급${input.memo ? ` · ${input.memo}` : ""}`,
+        memo: pa.firm + " " + pa.alias + " 지급" + (input.memo ? " · " + input.memo : ""),
         createdAt: Date.now(),
       };
-      // 현금 수령이면 legs 로 기록
+      // Cash receipts are represented as a transfer leg with transaction-time FX metadata.
       if (input.to.kind === "cash") {
         tx.type = "transfer";
         tx.from = { kind: "account", id: "prop-clearing" };
-        tx.legs = [{ kind: "cash", id: input.to.id, amount: round(credit, 6) }];
+        tx.legs = [{
+          kind: "cash", id: input.to.id, amount: credit,
+          currency: target.currency, fxRate: targetFxRate,
+          amountBase: baseAmt, baseCurrency: d.settings.base,
+        }];
       }
 
       const pers: Persist = [
