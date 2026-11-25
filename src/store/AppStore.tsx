@@ -781,7 +781,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }
 
       await Promise.all(oldSnapshotTxs.map((tx) => delRow("transactions", tx.id)));
-      commit(recordHistory(next), pers);
+      await commit(recordHistory(next), pers);
     },
     [commit, recordHistory],
   );
@@ -879,7 +879,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         next = bumpRel(next, input.from.kind, input.from.id, -(input.amount + input.fee), pers);
       }
 
-      commit(recordHistory(next), pers);
+      await commit(recordHistory(next), pers);
       return sessionId!;
     },
     [commit, recordHistory],
@@ -965,7 +965,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           next = bumpCrypto(next, leg.id, input.symbol ?? "USDT", leg.amount, pers);
         else next = bumpRel(next, leg.kind, leg.id, leg.amount, pers);
       });
-      commit(recordHistory(next), pers);
+      await commit(recordHistory(next), pers);
     },
     [commit, recordHistory],
   );
@@ -1083,7 +1083,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (cashRow) pers.push(["cashLocations", cashRow]);
       pers.push(["propAccounts", paRow]);
 
-      commit(recordHistory(next), pers);
+      await commit(recordHistory(next), pers);
     },
     [commit, recordHistory],
   );
