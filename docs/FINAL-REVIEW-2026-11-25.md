@@ -69,3 +69,6 @@ Before APK packaging was gated behind manual dispatch, an earlier workflow run [
 A second pass found that asset deletion guards were incomplete: some screens checked only transaction source/account fields and did not cover transfer destination legs or related investment, prop, and casino records. The store now rejects deletion whenever a record references the account, cash location, crypto wallet, prop account, or casino. The UI surfaces the rejection rather than silently removing linked data.
 
 Additional physical QA: attempt to delete an account referenced only as a transfer destination; a cash location referenced by a casino Cash-out; a crypto wallet referenced by crypto assets, crypto transactions, or casino flows; a prop account with payout history; and a casino with session history. Every deletion must be blocked without changing data.
+
+
+The follow-up review also corrected the crypto wallet detail amount so its USD-native value is no longer mislabeled when the selected base currency is KRW/KHR. Prop payout totals in the analysis screen and generated AI analysis context now use the net amount after the stored USD-denominated fee is converted at the payout's historical FX rate.
