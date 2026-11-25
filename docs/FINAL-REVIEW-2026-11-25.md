@@ -25,23 +25,23 @@
 | CI permissions | The workflow previously had write access and generated-file auto-commit behavior. | Keep repository permissions read-only and do not auto-commit generated files. |
 | APK workflow | Routine code review previously generated a debug APK. | Keep push/PR checks to tests, type checking, and web build; gate APK packaging behind manual `workflow_dispatch` input. |
 | GitHub PR target | PR #1 targeted `main` instead of the intended audit baseline. | Retarget PR #1 to `audit/phase-1-baseline`; `main` was not modified. |
-| Documentation and metadata | README and package-lock metadata were stale. | Align package-lock root version and refresh README/build/QA instructions. |
+| Documentation and metadata | README and package-lock metadata were stale; the npm package still had the Vite template name. | Align package-lock root version, rename the npm package to `jalsalabose`, and refresh README/build/QA instructions. |
 | GitHub Actions runtime | Older action major versions emitted Node 20 deprecation warnings on current runners. | Upgrade checkout/setup-node/setup-java/upload-artifact to current major releases; pin Android setup-android to v4.0.4. |
 | Signing artifact hygiene | Additional signing formats and generated APK/AAB files could be accidentally committed. | Ignore JKS, keystore, P12, PFX, PEM, KEY, keystore properties, APK, and AAB files. |
 
 ## Latest automated verification
 
-The latest code and CI configuration verification completed successfully at commit `c235387c35cd9cbd645e56794aec56db1875b6b5`.
+The latest code, package metadata, and CI configuration verification completed successfully at commit `1f9e29f8313e6f021fc6ca243f04ff90ba216a1e`.
 
-- GitHub Actions push run: [45595543320](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45595543320)
-- GitHub Actions pull request run: [45595556893](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45595556893)
+- GitHub Actions push run: [45595811996](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45595811996)
+- GitHub Actions pull request run: [45595820240](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45595820240)
 - `npm ci`: passed
 - Financial regression tests: passed
 - TypeScript check: passed
 - Vite production build: passed
 - Android APK job: skipped by design; no APK artifact was created by these runs
 
-The tests cover transaction-time FX display across base-currency changes, backdated casino Buy-ins, balance reversals for deleted transactions, and external prop payout reversal. The subsequent documentation-only commit updates the workflow label in the APK instructions; application code and workflow behavior are unchanged. Automated verification does not certify Android installation or physical-device behavior.
+The tests cover transaction-time FX display across base-currency changes, backdated casino Buy-ins, balance reversals for deleted transactions, and external prop payout reversal. This automated verification does not certify Android installation or physical-device behavior.
 
 ## Remaining checks before release
 
