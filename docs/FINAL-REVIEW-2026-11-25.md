@@ -31,9 +31,9 @@
 
 ## Latest automated verification
 
-The latest code, package metadata, CI configuration, linked-asset deletion safeguards, crypto valuation correction, and net prop payout reporting verification completed successfully at commit `46892d7e72bcbaea94085ed41c83317fe831a5a9`.
+The latest code, package metadata, CI configuration, linked-asset deletion safeguards, crypto valuation correction, net prop payout reporting, and overlapping-commit guard verification completed successfully at commit `e56a009516c565596d0feea931786bb4e53a15fb`.
 
-- GitHub Actions verification run: [45610307847](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45610307847)
+- GitHub Actions verification run: [45610562532](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45610562532)
 - `npm ci`: passed
 - Financial regression tests: passed
 - TypeScript check: passed
