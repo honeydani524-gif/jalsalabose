@@ -18,12 +18,10 @@ import {
 } from "react";
 import {
   allRows,
-  clearAll,
-  clearStore,
-  delRow,
   putRow,
   putRows,
   putBatch,
+  writeBatch,
   replaceAll,
   STORE_LIST,
   uid,
@@ -307,7 +305,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const ref = useRef<Data | null>(null);
   const histLock = useRef(false);
 
-  const commit = useCallback(async (next: Data, persist: Persist = []) => {
+  const commit = useCallback(async (next: Data, persist: Persist = [], deletes: [StoreName, string][] = []) => {
     const previous = ref.current;
     const writes: [StoreName, { id: string }][] = persist.flatMap(([store, row]) =>
       row ? [[store, row] as [StoreName, { id: string }]] : [],
@@ -321,7 +319,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     ) writes.push(["nwHistory", newPoint]);
 
     try {
-      await putBatch(writes);
+      await writeBatch(writes, deletes);
       ref.current = next;
       setData(next);
       setError(null);
@@ -402,8 +400,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         }
         if (loaded.casinoBuyIns === undefined) loaded.casinoBuyIns = [];
         if (!alive) return;
-        ref.current = loaded;
-        setData(recordHistory(loaded));
+        await commit(recordHistory(loaded));
       } catch (e) {
         if (alive) setError(`데이터 로드 실패: ${String((e as Error)?.message ?? e)}`);
       }
@@ -411,7 +408,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     return () => {
       alive = false;
     };
-  }, [recordHistory]);
+  }, [recordHistory, commit]);
 
   const save = useCallback(
     async (store: StoreName, row: { id: string } & Record<string, unknown>) => {
@@ -430,8 +427,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!d) return;
       const list = (d as unknown as Record<StoreName, { id: string }[]>)[store] ?? [];
       const next = { ...d, [store]: list.filter((r) => r.id !== id) } as Data;
-      await delRow(store, id);
-      await commit(recordHistory(next));
+      await commit(recordHistory(next), [], [[store, id]]);
     },
     [commit, recordHistory],
   );
@@ -780,8 +776,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      await Promise.all(oldSnapshotTxs.map((tx) => delRow("transactions", tx.id)));
-      await commit(recordHistory(next), pers);
+      await commit(recordHistory(next), pers, oldSnapshotTxs.map((tx) => ["transactions", tx.id]));
     },
     [commit, recordHistory],
   );
@@ -1230,7 +1225,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       // A single IndexedDB transaction clears and rewrites every store.
       // If any write fails, IndexedDB rolls the entire transaction back.
       await replaceAll(normalized);
-      const { kv: _kv, ...tables } = normalized;
+      const tables = { ...normalized };
+      delete tables.kv;
       const merged = { ...tables, settings } as unknown as Data;
       ref.current = merged;
       setData(merged);
