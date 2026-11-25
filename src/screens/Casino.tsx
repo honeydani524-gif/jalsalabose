@@ -13,7 +13,7 @@ function CashOutForm({ sessionId, onClose }: { sessionId: string; onClose: () =>
   const ses = data.casinoSessions.find((s) => s.id === sessionId);
   const bi = data.casinoBuyIns.filter((b) => b.sessionId === sessionId);
   const currency = ses?.currency ?? "USD";
-  const sessionTotals = casinoSessionTotals(sessionId, data.casinoBuyIns, data.casinoCashOuts);
+  const sessionTotals = casinoSessionTotals(sessionId, data.casinoBuyIns, data.casinoCashOuts, ses);
   const bought = sessionTotals.open;
   const sessionFxRate = ses?.fxRate ?? bi[0]?.fxRate ?? 1;
 
@@ -170,7 +170,7 @@ function SessionDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const casino = data.casinos.find((c) => c.id === ses.casinoId);
   const bi = data.casinoBuyIns.filter((b) => b.sessionId === id).sort((a, b) => a.date - b.date);
   const co = data.casinoCashOuts.filter((c) => c.sessionId === id).sort((a, b) => a.date - b.date);
-  const sessionTotals = casinoSessionTotals(id, data.casinoBuyIns, data.casinoCashOuts);
+  const sessionTotals = casinoSessionTotals(id, data.casinoBuyIns, data.casinoCashOuts, ses);
   const totalIn = sessionTotals.buyIn;
   const totalOut = sessionTotals.cashOut;
   const pnl = round(totalOut - totalIn, 6);
@@ -395,7 +395,7 @@ export default function CasinoScreen() {
           </p>
           <div className="grid gap-2 sm:grid-cols-2">
             {ongoingSessions.map((s) => {
-              const totals = casinoSessionTotals(s.id, data.casinoBuyIns, data.casinoCashOuts);
+              const totals = casinoSessionTotals(s.id, data.casinoBuyIns, data.casinoCashOuts, s);
               const bi = totals.buyIn;
               const co = totals.cashOut;
               return (
