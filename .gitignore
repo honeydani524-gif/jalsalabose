@@ -12,6 +12,13 @@ android/.externalNativeBuild/
 android/.cxx/
 *.jks
 *.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+keystore.properties
+*.apk
+*.aab
 
 # Local environment
 .env
