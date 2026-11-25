@@ -1115,35 +1115,126 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     async (text: string) => {
       let parsed: Record<string, unknown>;
       try {
-        parsed = JSON.parse(text);
-      } catch {
+        const value: unknown = JSON.parse(text);
+        if (!value || typeof value !== "object" || Array.isArray(value))
+          throw new Error("백업의 최상위 구조가 올바르지 않습니다.");
+        parsed = value as Record<string, unknown>;
+      } catch (e) {
+        if (e instanceof Error && e.message !== "Unexpected end of JSON input" &&
+          e.message !== "백업의 최상위 구조가 올바르지 않습니다.") throw e;
         throw new Error("올바른 JSON 파일이 아닙니다.");
       }
+
       const meta = parsed.meta as { app?: string; schemaVersion?: number } | undefined;
       if (!meta || meta.app !== "JalSalAboSe") throw new Error("잘살아보세 백업 파일이 아닙니다.");
       if (typeof meta.schemaVersion === "number" && meta.schemaVersion > 1)
         throw new Error("이 앱보다 높은 데이터 버전입니다. 앱을 먼저 업그레이드하세요.");
+      if (typeof meta.schemaVersion === "number" && meta.schemaVersion < 1)
+        throw new Error("지원하지 않는 백업 데이터 버전입니다.");
 
-      await clearAll();
-      for (const s of STORE_LIST) {
-        const rows = parsed[s];
-        if (Array.isArray(rows) && rows.length) await putRows(s, rows as { id: string }[]);
+      const isRecord = (value: unknown): value is Record<string, unknown> =>
+        !!value && typeof value === "object" && !Array.isArray(value);
+      const required: Partial<Record<StoreName, string[]>> = {
+        countries: ["code", "name", "symbol", "sortOrder"],
+        institutions: ["countryId", "name", "kind", "sortOrder"],
+        accountTypes: ["code", "label", "group", "includesInNetWorth"],
+        accounts: ["alias", "accountTypeId", "currency", "openingBalance", "balance"],
+        cashLocations: ["name", "kind", "currency", "openingBalance", "balance"],
+        transactions: ["type", "amount", "currency", "date"],
+        categories: ["kind", "name", "sortOrder"],
+        tags: ["name", "color", "sortOrder"],
+        exchangeRates: ["base", "rate", "effectiveAt", "source"],
+        invSnapshots: ["accountId", "date", "endBalance", "deposit", "withdrawal"],
+        propAccounts: ["firm", "alias", "kind", "nominalSize", "balance", "status"],
+        propPayouts: ["propAccountId", "amount", "currency", "fxRate", "receivedAt", "to", "fee"],
+        cryptoWallets: ["name", "kind", "sortOrder"],
+        cryptoAssets: ["walletId", "symbol", "quantity"],
+        cryptoPrices: ["symbol", "price", "currency", "fetchedAt"],
+        cryptoTx: ["walletId", "type", "symbol", "quantity", "date"],
+        casinos: ["name", "sortOrder"],
+        casinoSessions: ["casinoId", "startedAt", "status", "currency"],
+        casinoBuyIns: ["sessionId", "from", "amount", "currency", "fxRate", "chipAmount", "fee", "date"],
+        casinoCashOuts: ["sessionId", "totalAmount", "currency", "fxRate", "fee", "date", "legs"],
+        nwHistory: ["t", "value", "base"],
+      };
+      const numericFields: Partial<Record<StoreName, string[]>> = {
+        accounts: ["openingBalance", "balance"],
+        cashLocations: ["openingBalance", "balance"],
+        transactions: ["amount", "date"],
+        exchangeRates: ["rate", "effectiveAt"],
+        invSnapshots: ["endBalance", "deposit", "withdrawal"],
+        propAccounts: ["nominalSize", "balance"],
+        propPayouts: ["amount", "fxRate", "receivedAt", "fee"],
+        cryptoAssets: ["quantity"],
+        cryptoPrices: ["price", "fetchedAt"],
+        cryptoTx: ["quantity", "date"],
+        casinoSessions: ["startedAt"],
+        casinoBuyIns: ["amount", "fxRate", "chipAmount", "fee", "date"],
+        casinoCashOuts: ["totalAmount", "fxRate", "fee", "date"],
+        nwHistory: ["t", "value"],
+      };
+
+      const normalized = {} as Record<StoreName, { id: string }[]>;
+      for (const store of STORE_LIST) {
+        const raw = parsed[store];
+        if (raw !== undefined && !Array.isArray(raw))
+          throw new Error(`백업의 ${store} 데이터가 배열이 아닙니다.`);
+        const rows = (Array.isArray(raw) ? raw : []) as unknown[];
+        const seen = new Set<string>();
+        normalized[store] = rows.map((row, index) => {
+          if (!isRecord(row) || typeof row.id !== "string" || !row.id.trim())
+            throw new Error(`${store} ${index + 1}번째 항목의 ID가 올바르지 않습니다.`);
+          if (seen.has(row.id)) throw new Error(`${store}에 중복 ID가 있습니다: ${row.id}`);
+          seen.add(row.id);
+          for (const field of required[store] ?? []) {
+            if (!(field in row) || row[field] === null || row[field] === undefined)
+              throw new Error(`${store} ${row.id} 항목에 필수 값 ${field}이(가) 없습니다.`);
+          }
+          for (const field of numericFields[store] ?? []) {
+            if (typeof row[field] !== "number" || !Number.isFinite(row[field] as number))
+              throw new Error(`${store} ${row.id} 항목의 ${field} 값이 숫자가 아닙니다.`);
+          }
+          if (store === "transactions" && row.tagIds === undefined) row.tagIds = [];
+          if (store === "casinoCashOuts") {
+            if (!Array.isArray(row.legs) || row.legs.some((leg) =>
+              !isRecord(leg) || typeof leg.id !== "string" ||
+              typeof leg.kind !== "string" || typeof leg.amount !== "number" ||
+              !Number.isFinite(leg.amount)
+            )) throw new Error(`casinoCashOuts ${row.id}의 도착 자산 목록이 올바르지 않습니다.`);
+          }
+          if (store === "casinoBuyIns" && !isRecord(row.from))
+            throw new Error(`casinoBuyIns ${row.id}의 출발 자산 정보가 올바르지 않습니다.`);
+          return row as { id: string };
+        });
       }
-      const fresh = Object.fromEntries(
-        STORE_LIST.map((s) => [s, []]),
-      ) as unknown as Record<StoreName, never[]>;
-      const settings = (parsed.kv as Settings[] | undefined)?.[0] ?? DEFAULT_SETTINGS;
-      const rebuilt = { ...fresh, settings } as unknown as Data;
-      // 전체 재로드
-      const rows2 = await Promise.all(STORE_LIST.map((s) => allRows<never>(s)));
-      const map = Object.fromEntries(STORE_LIST.map((s, i) => [s, rows2[i]])) as unknown as Record<
-        StoreName,
-        never[]
-      >;
-      const merged = { ...(rebuilt as unknown as Record<string, unknown>), ...map } as unknown as Data;
+
+      if (normalized.kv.length > 1)
+        throw new Error("설정 데이터가 여러 개 포함되어 있습니다.");
+      const settingsRow = normalized.kv[0] as (Settings & { id: string }) | undefined;
+      const rawRates = settingsRow?.rates;
+      if (rawRates !== undefined && !isRecord(rawRates))
+        throw new Error("설정의 환율 정보가 올바르지 않습니다.");
+      const settings = {
+        ...DEFAULT_SETTINGS,
+        ...(settingsRow ?? {}),
+        rates: { ...DEFAULT_SETTINGS.rates, ...(isRecord(rawRates) ? rawRates : {}) },
+      } as Settings;
+      if (typeof settings.base !== "string" || !settings.base.trim())
+        throw new Error("기준 통화 설정이 올바르지 않습니다.");
+      Object.entries(settings.rates).forEach(([currency, rate]) => {
+        if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0)
+          throw new Error(`${currency} 환율 설정이 올바르지 않습니다.`);
+      });
+      normalized.kv = [{ id: "settings", ...settings }];
+
+      // A single IndexedDB transaction clears and rewrites every store.
+      // If any write fails, IndexedDB rolls the entire transaction back.
+      await replaceAll(normalized);
+      const { kv: _kv, ...tables } = normalized;
+      const merged = { ...tables, settings } as unknown as Data;
       ref.current = merged;
       setData(merged);
-      void settings;
+      setError(null);
     },
     [],
   );
