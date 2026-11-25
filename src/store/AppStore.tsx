@@ -450,7 +450,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           d.cryptoTx.some((tx) =>
             tx.walletId === id || tx.fromWalletId === id || tx.toWalletId === id
           ) ||
-          d.casinoBuyIns.some((buyIn) => buyIn.from.kind === "crypto" && buyIn.from.id === id);
+          d.casinoBuyIns.some((buyIn) => buyIn.from.kind === "crypto" && buyIn.from.id === id) ||
+          d.casinoCashOuts.some((cashOut) =>
+            cashOut.legs.some((leg) => leg.kind === "crypto" && leg.id === id)
+          );
         if (referenced)
           throw new Error("코인 잔액 또는 거래·카지노 기록에서 사용 중인 지갑은 삭제할 수 없습니다.");
       }
