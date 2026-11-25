@@ -531,11 +531,12 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
             currency,
             fxRate,
             amountBase: toBaseAtTx(d, leg.amount, currency, input.date),
+            baseCurrency: d.settings.base,
           };
         });
         const sourceBase = input.amount / rateAtTx(d, input.currency, input.date);
         const destinationBase = normalizedLegs.reduce((sum, leg) => sum + leg.amount / (leg.fxRate ?? 1), 0);
-        if (Math.abs(sourceBase - destinationBase) > 0.00001)
+        if (Math.abs(sourceBase - destinationBase) > 0.01)
           throw new Error(`환산 기준 도착 합계(${round(destinationBase, 6)})가 출발 금액(${round(sourceBase, 6)})과 다릅니다.`);
         assertBalance(d, input.from.kind, input.from.id, input.amount);
       }
@@ -548,6 +549,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         currency: input.currency,
         fxRate,
         amountBase: toBaseAtTx(d, input.amount, input.currency, input.date),
+        baseCurrency: d.settings.base,
         date: input.date,
         accountId: input.accountId,
         from: input.from,
