@@ -29,20 +29,32 @@ export default function SettingsScreen() {
   const [detail, setDetail] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const doExport = () => {
+  const doExport = async () => {
     try {
       const text = exportJSON();
+      const filename = `jalsalabose-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      const file = new File([text], filename, { type: "application/json" });
+
+      // Prefer the native share sheet on Android/mobile browsers that support file sharing.
+      if (typeof navigator.share === "function" && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: "잘살아보세 백업" });
+        setMsg("백업 파일 공유 메뉴를 열었습니다. 파일 앱에 저장해 주세요.");
+        return;
+      }
+
       const blob = new Blob([text], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `jalsalabose-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
-      setMsg("백업 파일을 내려받았습니다.");
+      // Do not revoke synchronously; some browsers start the download asynchronously.
+      window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+      setMsg("백업 파일 다운로드를 요청했습니다.");
     } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
       setMsg(`내보내기 실패: ${(e as Error).message}`);
     }
   };
