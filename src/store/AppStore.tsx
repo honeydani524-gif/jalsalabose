@@ -34,7 +34,7 @@ import {
   toBase,
   type Settings,
 } from "../domain/calc";
-import { convertAtRates, rateAt as historicalRateAt, toSessionCurrency } from "../domain/finance";
+import { convertAtRates, netPayoutAfterUsdFee, rateAt as historicalRateAt, toSessionCurrency } from "../domain/finance";
 import {
   computeNetWorth,
   casinoSessionTotals,
@@ -1019,9 +1019,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       // Fees are entered in USD; convert them using the FX rate effective on receipt date.
       const payoutFxRate = rateAtTx(d, input.currency, input.receivedAt);
       const targetFxRate = rateAtTx(d, target.currency, input.receivedAt);
-      const netPayout = input.amount - input.fee * payoutFxRate;
-      if (netPayout <= 0)
-        throw new Error("USD 수수료를 차감한 실제 지급액은 0보다 커야 합니다.");
+      const netPayout = netPayoutAfterUsdFee(input.amount, payoutFxRate, input.fee);
       const baseAmt = toBaseAtTx(d, netPayout, input.currency, input.receivedAt);
       const credit = round(convertAtRates(netPayout, payoutFxRate, targetFxRate), 6);
 
