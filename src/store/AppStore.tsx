@@ -35,6 +35,7 @@ import {
   toBase,
   type Settings,
 } from "../domain/calc";
+import { convertAtRates, toSessionCurrency } from "../domain/finance";
 import {
   computeNetWorth,
   type Account,
@@ -599,10 +600,14 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!d) return;
       const acc = d.accounts.find((a) => a.id === input.accountId);
       if (!acc) throw new Error("계좌를 찾을 수 없습니다.");
-      const prev = d.invSnapshots
-        .filter((s) => s.accountId === input.accountId && s.date < input.date)
-        .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
-      const prevBal = prev ? prev.endBalance : acc.openingBalance;
+      if (input.endBalance < 0 || input.deposit < 0 || input.withdrawal < 0)
+        throw new Error("잔액과 입출금은 음수일 수 없습니다.");
+      if ((input.deposit > 0 || input.withdrawal > 0) && !input.fromId)
+        throw new Error("입출금 자금이 이동할 계좌 또는 현금을 선택하세요.");
+      if (input.fromId && input.fromKind === undefined)
+        throw new Error("자금 이동 자산 유형을 확인할 수 없습니다.");
+      if (input.fromId && input.fromKind === "account" && input.fromId === input.accountId)
+        throw new Error("투자 계좌 자신을 자금 이동 대상으로 선택할 수 없습니다.");
 
       const existing = d.invSnapshots.find(
         (s) => s.accountId === input.accountId && s.date === input.date,
@@ -617,59 +622,82 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         memo: input.memo,
         createdAt: Date.now(),
       };
-      const pers: Persist = [["invSnapshots", snap]];
+      const oldSnapshotTxs = d.transactions.filter((tx) => tx.snapshotId === snap.id);
       let next: Data = {
         ...d,
         invSnapshots: existing
           ? d.invSnapshots.map((s) => (s.id === snap.id ? snap : s))
           : [...d.invSnapshots, snap],
+        transactions: d.transactions.filter((tx) => tx.snapshotId !== snap.id),
+        accounts: d.accounts.map((a) =>
+          a.id === input.accountId ? { ...a, balance: round(input.endBalance, 6) } : a,
+        ),
       };
-
-      // 계좌 잔액 캐시 갱신
-      const accounts = next.accounts.map((a) =>
-        a.id === input.accountId ? { ...a, balance: input.endBalance } : a,
-      );
-      const accRow = accounts.find((a) => a.id === input.accountId)!;
-      next = { ...next, accounts };
+      const pers: Persist = [["invSnapshots", snap]];
+      const accRow = next.accounts.find((a) => a.id === input.accountId)!;
       pers.push(["accounts", accRow]);
 
-      // 타 계좌에서 들어온 입금/출금이면 내부 이체 1건 생성 (ΔΣ = 0)
-      if (input.fromId && (input.deposit > 0 || input.withdrawal > 0)) {
-        const amount = input.deposit > 0 ? input.deposit : input.withdrawal;
-        const dir = input.deposit > 0 ? 1 : -1;
+      // Reverse any earlier flow rows for this same snapshot before replacing them.
+      oldSnapshotTxs.forEach((tx) => {
+        if (tx.from) next = bumpRel(next, tx.from.kind, tx.from.id, tx.amount, []);
+        (tx.legs ?? []).forEach((leg) => {
+          next = bumpRel(next, leg.kind, leg.id, -leg.amount, []);
+        });
+      });
+
+      if ((input.deposit > 0 || input.withdrawal > 0) && input.fromId) {
         const fromKind = input.fromKind ?? "account";
-        const legs: Leg[] =
-          dir === 1
-            ? [{ kind: "account", id: input.accountId, amount }]
-            : [{ kind: fromKind, id: input.fromId, amount }];
-        const tx: Tx = {
-          id: uid(),
-          type: "transfer",
-          amount,
-          currency: acc.currency,
-          fxRate: rateOf(d.settings, acc.currency),
-          amountBase: round(toBase(amount, acc.currency, d.settings), 6),
-          date: Date.now(),
-          from: dir === 1 ? { kind: fromKind, id: input.fromId } : { kind: "account", id: input.accountId },
-          legs,
-          tagIds: [],
-          memo: `${input.date} 투자 ${input.deposit > 0 ? "입금" : "출금"}`,
-          createdAt: Date.now(),
-        };
-        const p2: Persist = [["transactions", tx]];
-        let n2: Data = { ...next, transactions: [...next.transactions, tx] };
-        if (dir === 1) {
-          n2 = bumpRel(n2, fromKind, input.fromId, -amount, p2);
-          n2 = bumpRel(n2, "account", input.accountId, amount, p2);
-        } else {
-          n2 = bumpRel(n2, "account", input.accountId, -amount, p2);
-          n2 = bumpRel(n2, fromKind, input.fromId, amount, p2);
+        const sourceRow =
+          fromKind === "account"
+            ? next.accounts.find((a) => a.id === input.fromId)
+            : next.cashLocations.find((a) => a.id === input.fromId);
+        if (!sourceRow) throw new Error("자금 이동 자산을 찾을 수 없습니다.");
+        const sourceCurrency = sourceRow.currency;
+        const sourceFx = rateOf(d.settings, sourceCurrency);
+        const investmentFx = rateOf(d.settings, acc.currency);
+        const txDate = new Date(`${input.date}T12:00:00`).getTime();
+
+        if (input.deposit > 0) {
+          const sourceAmount = round(convertAtRates(input.deposit, investmentFx, sourceFx), 6);
+          assertBalance(next, fromKind, input.fromId, sourceAmount);
+          const tx: Tx = {
+            id: uid(), type: "transfer", amount: sourceAmount, currency: sourceCurrency,
+            fxRate: sourceFx, amountBase: round(toBase(sourceAmount, sourceCurrency, d.settings), 6),
+            date: txDate, from: { kind: fromKind, id: input.fromId },
+            legs: [{
+              kind: "account", id: input.accountId, amount: round(input.deposit, 6),
+              currency: acc.currency, fxRate: investmentFx,
+              amountBase: round(toBase(input.deposit, acc.currency, d.settings), 6),
+            }],
+            tagIds: [], memo: `${input.date} 투자 입금`, snapshotId: snap.id, createdAt: Date.now(),
+          };
+          next = { ...next, transactions: [...next.transactions, tx] };
+          next = bumpRel(next, fromKind, input.fromId, -sourceAmount, pers);
+          pers.push(["transactions", tx]);
         }
-        next = n2;
-        p2.forEach(([s, r]) => pers.push([s, r]));
+
+        if (input.withdrawal > 0) {
+          assertBalance(d, "account", input.accountId, input.withdrawal);
+          const destinationAmount = round(convertAtRates(input.withdrawal, investmentFx, sourceFx), 6);
+          const tx: Tx = {
+            id: uid(), type: "transfer", amount: round(input.withdrawal, 6), currency: acc.currency,
+            fxRate: investmentFx, amountBase: round(toBase(input.withdrawal, acc.currency, d.settings), 6),
+            date: txDate, from: { kind: "account", id: input.accountId },
+            legs: [{
+              kind: fromKind, id: input.fromId, amount: destinationAmount,
+              currency: sourceCurrency, fxRate: sourceFx,
+              amountBase: round(toBase(destinationAmount, sourceCurrency, d.settings), 6),
+            }],
+            tagIds: [], memo: `${input.date} 투자 출금`, snapshotId: snap.id, createdAt: Date.now(),
+          };
+          next = { ...next, transactions: [...next.transactions, tx] };
+          // The investment account is already set to the authoritative ending balance above.
+          next = bumpRel(next, fromKind, input.fromId, destinationAmount, pers);
+          pers.push(["transactions", tx]);
+        }
       }
 
-      void prevBal;
+      await Promise.all(oldSnapshotTxs.map((tx) => delRow("transactions", tx.id)));
       commit(recordHistory(next), pers);
     },
     [commit, recordHistory],
