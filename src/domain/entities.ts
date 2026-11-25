@@ -57,7 +57,15 @@ export type Category = {
 };
 export type Tag = { id: string; name: string; color: string; sortOrder: number; archivedAt?: number };
 
-export type Leg = { kind: "account" | "cash"; id: string; amount: number };
+export type Leg = {
+  kind: "account" | "cash";
+  id: string;
+  amount: number;
+  /** Transaction-time destination currency and FX snapshot (optional for legacy rows). */
+  currency?: string;
+  fxRate?: number;
+  amountBase?: number;
+};
 
 export type TxType = "income" | "expense" | "transfer" | "casino" | "adjust";
 export type Tx = {
@@ -77,6 +85,8 @@ export type Tx = {
   counterparty?: string;
   sessionId?: string;
   reason?: string;
+  /** Links internally generated transfer rows to an investment snapshot. */
+  snapshotId?: string;
   createdAt: number;
 };
 
@@ -175,6 +185,8 @@ export type Session = {
   endedAt?: number;
   status: "ongoing" | "closed";
   currency: string;
+  /** Units of session currency per USD, captured when the first Buy-in created the session. */
+  fxRate?: number;
   memo?: string;
 };
 export type BuyIn = {
@@ -184,6 +196,8 @@ export type BuyIn = {
   amount: number;
   currency: string;
   fxRate: number;
+  /** Buy-in amount expressed in the fixed session currency at transaction time. */
+  sessionAmount?: number;
   chipAmount: number;
   fee: number;
   date: number;
@@ -198,7 +212,17 @@ export type CashOut = {
   fee: number;
   date: number;
   memo?: string;
-  legs: { kind: RelKind; id: string; amount: number }[];
+  /** Cash-out total expressed in the fixed session currency at transaction time. */
+  sessionAmount?: number;
+  legs: {
+    kind: RelKind;
+    id: string;
+    amount: number;
+    currency?: string;
+    fxRate?: number;
+    /** Leg amount expressed in session currency at transaction time. */
+    amountSession?: number;
+  }[];
 };
 export type NwPoint = { id: string; t: number; value: number; base: string };
 
