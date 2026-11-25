@@ -26,7 +26,9 @@ On Windows, run `gradlew.bat assembleDebug` from the `android` directory.
 
 ## GitHub Actions build
 
-The repository workflow builds a debug APK and uploads it as the `jalsalabose-android-debug` artifact. Open the successful workflow run and download the artifact from its Artifacts section.
+Pushes and pull requests run the financial tests, TypeScript check, and web production build only. They do not create an APK.
+
+To create a debug APK later, open **Actions → Verify and build Android APK → Run workflow**, enable `build_apk`, and start the workflow. After the Android job succeeds, download the `jalsalabose-android-debug` artifact from that run.
 
 ## Local data behavior
 
