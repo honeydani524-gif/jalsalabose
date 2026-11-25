@@ -18,7 +18,7 @@
 | Transaction deletion | Deleting a ledger row removed only the transaction record, leaving cached asset balances unchanged. | Reverse the transaction's native-currency balance effects and delete the row atomically; protect snapshot-generated rows and safely unlink new prop payouts. |
 | Base-currency changes | Historical transaction `amountBase` values could be summed as though they used the newly selected display currency. | Convert stored transaction-time base snapshots into the current display base using the historical FX table; fall back to each transaction's stored FX for legacy rows. |
 | Backup restore | Missing store arrays or malformed values could risk destructive replacement. | Validate required stores, IDs, financial fields, settings, and casino legs before one atomic replacement. |
-| IndexedDB writes | A synchronous object-store write exception could leave earlier queued writes eligible to commit. | Abort the whole transaction on synchronous errors in batch and replace operations. |
+| IndexedDB writes | A synchronous object-store write exception could leave earlier queued writes eligible to commit; overlapping UI mutations could calculate from the same stale in-memory state. | Abort the whole transaction on synchronous errors in batch and replace operations; reject overlapping state commits rather than silently overwriting a newer balance. |
 | Exchange-rate settings | Rate-history rows and settings could be persisted separately. | Save settings and all new rate-history rows in one multi-store transaction. |
 | Backup export | Immediate object-URL cleanup and mobile sharing could cause unreliable exports. | Prefer native file sharing when available and defer URL cleanup for download fallback. |
 | Android instrumentation test | The sample test expected the wrong application ID. | Align the assertion with `com.jalsalabose.app`. |
@@ -71,3 +71,6 @@ Additional physical QA: attempt to delete an account referenced only as a transf
 
 
 The follow-up review also corrected the crypto wallet detail amount so its USD-native value is no longer mislabeled when the selected base currency is KRW/KHR. Prop payout totals in the analysis screen and generated AI analysis context now use the net amount after the stored USD-denominated fee is converted at the payout's historical FX rate.
+
+
+A commit-level overlap guard was added so two rapid state mutations cannot both persist balance values derived from the same stale in-memory snapshot. A conflicting second commit is rejected with a retry message instead of silently overwriting the first result.
