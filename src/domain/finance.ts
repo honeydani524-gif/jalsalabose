@@ -57,3 +57,24 @@ export function rateAt(
   const value = historical?.rate ?? fallback;
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 1;
 }
+
+/** Convert a USD-denominated payout fee into the payout currency and subtract it. */
+export function netPayoutAfterUsdFee(
+  grossAmount: number,
+  payoutCurrencyPerUsd: number,
+  feeUsd: number,
+): number {
+  if (
+    !Number.isFinite(grossAmount) ||
+    !Number.isFinite(payoutCurrencyPerUsd) ||
+    !Number.isFinite(feeUsd) ||
+    grossAmount <= 0 ||
+    payoutCurrencyPerUsd <= 0 ||
+    feeUsd < 0
+  ) {
+    throw new Error("지급 금액, 수수료 또는 환율이 올바르지 않습니다.");
+  }
+  const net = grossAmount - feeUsd * payoutCurrencyPerUsd;
+  if (net <= 0) throw new Error("수수료를 차감한 실제 지급액은 0보다 커야 합니다.");
+  return net;
+}
