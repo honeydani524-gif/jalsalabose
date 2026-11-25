@@ -305,6 +305,31 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const histLock = useRef(false);
   const commitBusy = useRef(false);
 
+  // Whole-database replacement (restore/reset/sample) must be mutually exclusive
+  // with normal commits, and publish in-memory state before releasing the lock.
+  const replaceAllAndPublish = useCallback(async (
+    rowsByStore: Record<StoreName, { id: string }[]>,
+    next: Data,
+  ) => {
+    if (commitBusy.current) {
+      const message = "다른 저장 작업이 진행 중입니다. 잠시 후 다시 시도하세요.";
+      setError(message);
+      throw new Error(message);
+    }
+    commitBusy.current = true;
+    try {
+      await replaceAll(rowsByStore);
+      ref.current = next;
+      setData(next);
+      setError(null);
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e));
+      throw e;
+    } finally {
+      commitBusy.current = false;
+    }
+  }, []);
+
   const commit = useCallback(async (next: Data, persist: Persist = [], deletes: [StoreName, string][] = []) => {
     if (commitBusy.current) {
       const message = "다른 저장 작업이 진행 중입니다. 잠시 후 다시 시도하세요.";
@@ -1366,16 +1391,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
       // A single IndexedDB transaction clears and rewrites every store.
       // If any write fails, IndexedDB rolls the entire transaction back.
-      await replaceAll(normalized);
       const tables = Object.fromEntries(
         STORE_LIST.filter((store) => store !== "kv").map((store) => [store, normalized[store]]),
       );
       const merged = { ...tables, settings } as unknown as Data;
-      ref.current = merged;
-      setData(merged);
-      setError(null);
+      await replaceAllAndPublish(normalized, merged);
     },
-    [],
+    [replaceAllAndPublish],
   );
 
   const resetAll = useCallback(async () => {
@@ -1389,11 +1411,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           : ((fresh as unknown as Record<string, { id: string }[]>)[store] ?? []),
       ]),
     ) as Record<StoreName, { id: string }[]>;
-    await replaceAll(rowsByStore);
-    ref.current = fresh;
-    setData(fresh);
-    setError(null);
-  }, []);
+    await replaceAllAndPublish(rowsByStore, fresh);
+  }, [replaceAllAndPublish]);
 
   /* ── 샘플 데이터 (사용자가 직접 생성 · 삭제 가능) ── */
   const loadSample = useCallback(async () => {
@@ -1525,11 +1544,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           : ((withHist as unknown as Record<string, { id: string }[]>)[store] ?? []),
       ]),
     ) as Record<StoreName, { id: string }[]>;
-    await replaceAll(rowsByStore);
-    ref.current = withHist;
-    setData(withHist);
-    setError(null);
-  }, [commit, recordHistory]);
+    await replaceAllAndPublish(rowsByStore, withHist);
+  }, [commit, recordHistory, replaceAllAndPublish]);
 
   const value = useMemo<StoreValue | null>(() => {
     if (!data) return null;
