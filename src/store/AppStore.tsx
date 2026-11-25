@@ -645,7 +645,11 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const previousSnapshot = d.invSnapshots
         .filter((s) => s.accountId === input.accountId && s.date < input.date)
         .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+      const laterSnapshot = d.invSnapshots
+        .filter((s) => s.accountId === input.accountId && s.date > input.date)
+        .sort((a, b) => (a.date > b.date ? 1 : -1))[0];
       const previousBalance = previousSnapshot?.endBalance ?? acc.openingBalance;
+      const effectiveEndBalance = laterSnapshot?.endBalance ?? input.endBalance;
       if (input.withdrawal > previousBalance + input.deposit + 1e-6)
         throw new Error("이전 평가잔액과 입금액보다 큰 금액을 출금할 수 없습니다.");
       const existing = d.invSnapshots.find(
@@ -669,7 +673,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           : [...d.invSnapshots, snap],
         transactions: d.transactions.filter((tx) => tx.snapshotId !== snap.id),
         accounts: d.accounts.map((a) =>
-          a.id === input.accountId ? { ...a, balance: round(input.endBalance, 6) } : a,
+          a.id === input.accountId ? { ...a, balance: round(effectiveEndBalance, 6) } : a,
         ),
       };
       const pers: Persist = [["invSnapshots", snap]];
@@ -688,7 +692,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       next = {
         ...next,
         accounts: next.accounts.map((a) =>
-          a.id === input.accountId ? { ...a, balance: round(input.endBalance, 6) } : a,
+          a.id === input.accountId ? { ...a, balance: round(effectiveEndBalance, 6) } : a,
         ),
       };
       const authoritativeAccount = next.accounts.find((a) => a.id === input.accountId)!;
