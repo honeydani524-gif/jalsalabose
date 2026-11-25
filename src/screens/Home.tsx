@@ -13,8 +13,7 @@ import {
   monthKey,
   monthLabel,
   pctChange,
-  rateOf,
-  sum,
+    sum,
 } from "../domain/calc";
 
 export default function HomeScreen() {
