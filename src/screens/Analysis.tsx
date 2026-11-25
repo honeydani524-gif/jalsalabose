@@ -351,6 +351,9 @@ const DATASETS = [
 export function AIScreen() {
   const { data, nw } = useStore();
   const s = data.settings;
+  const txBase = (t: (typeof data.transactions)[number]) => amountAtBaseCurrency(
+    t.amount, t.currency, t.fxRate, t.date, s.base, data.exchangeRates, s.rates, t.amountBase, t.baseCurrency,
+  );
   const [kind, setKind] = useState<Kind>("total");
   const [days, setDays] = useState<Period>("3m");
   const [picked, setPicked] = useState<string[]>(DATASETS.map((d) => d.key));
