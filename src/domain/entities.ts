@@ -442,16 +442,20 @@ export function computeNetWorth(d: DataSlice): NwResult {
 
   const crypto = cryptoTotalBase(d.cryptoAssets, d.cryptoPrices, s);
   d.cryptoWallets.forEach((w) => {
-    const v = walletValueIn(w.id, d.cryptoAssets, d.cryptoPrices, s);
-    const qty = d.cryptoAssets.filter((a) => a.walletId === w.id);
-    if (qty.length === 0) return;
+    const walletAssets = d.cryptoAssets.filter((a) => a.walletId === w.id);
+    if (walletAssets.length === 0) return;
+    const usdValue = walletAssets.reduce(
+      (sum, asset) => sum + asset.quantity * assetPrice(asset, d.cryptoPrices),
+      0,
+    );
+    const baseValue = walletValueIn(w.id, d.cryptoAssets, d.cryptoPrices, s);
     rows.push({
       id: w.id,
       group: "암호화폐",
       label: w.name,
       currency: "USD",
-      amount: round(v / (s.base === "USD" ? 1 : 1), 6),
-      base: round(v, 6),
+      amount: round(usdValue, 6),
+      base: round(baseValue, 6),
       included: true,
     });
   });
