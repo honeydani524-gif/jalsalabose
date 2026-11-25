@@ -678,12 +678,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           (tx.legs ?? []).some((leg) => leg.kind === "account" && leg.id === input.accountId);
         return touchesInvestment;
       });
+      const oldSnapshotTxIds = new Set(oldSnapshotTxs.map((tx) => tx.id));
       let next: Data = {
         ...d,
         invSnapshots: existing
           ? d.invSnapshots.map((s) => (s.id === snap.id ? snap : s))
           : [...d.invSnapshots, snap],
-        transactions: d.transactions.filter((tx) => tx.snapshotId !== snap.id),
+        transactions: d.transactions.filter((tx) => !oldSnapshotTxIds.has(tx.id)),
         accounts: d.accounts.map((a) =>
           a.id === input.accountId ? { ...a, balance: round(effectiveEndBalance, 6) } : a,
         ),
