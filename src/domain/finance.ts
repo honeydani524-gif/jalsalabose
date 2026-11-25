@@ -68,9 +68,17 @@ export function amountAtBaseCurrency(
   displayBaseCurrency: string,
   history: HistoricalRate[],
   fallbackRates: Record<string, number>,
+  storedAmountBase?: number,
+  storedBaseCurrency?: string,
 ): number {
   if (!Number.isFinite(amount) || !Number.isFinite(timestamp))
     throw new Error("거래 금액 또는 날짜가 올바르지 않습니다.");
+  if (typeof storedAmountBase === "number" && Number.isFinite(storedAmountBase) && storedBaseCurrency) {
+    if (storedBaseCurrency === displayBaseCurrency) return storedAmountBase;
+    const storedBaseRate = rateAt(storedBaseCurrency, timestamp, history, fallbackRates);
+    const displayRate = rateAt(displayBaseCurrency, timestamp, history, fallbackRates);
+    return Math.round(((storedAmountBase / storedBaseRate) * displayRate) * 1e6) / 1e6;
+  }
   const sourceRate = typeof transactionFxRate === "number" &&
     Number.isFinite(transactionFxRate) && transactionFxRate > 0
     ? transactionFxRate
