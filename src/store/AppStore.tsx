@@ -29,9 +29,7 @@ import {
 import {
   DEFAULT_SETTINGS,
   dayKey,
-  rateOf,
   round,
-  toBase,
   type Settings,
 } from "../domain/calc";
 import { convertAtRates, netPayoutAfterUsdFee, rateAt as historicalRateAt, toSessionCurrency } from "../domain/finance";
