@@ -122,3 +122,16 @@ describe("transaction deletion balance reversal", () => {
     })).toEqual([{ kind: "cash", id: "safe", delta: 30 }]);
   });
 });
+
+
+describe("external payout transfer reversal", () => {
+  it("reverses the credited cash leg without touching the virtual clearing account", () => {
+    expect(transactionReversalDeltas({
+      id: "payout", type: "transfer", amount: 500, currency: "KHR", fxRate: 4000,
+      amountBase: 0.125, baseCurrency: "USD", date: 1,
+      from: { kind: "account", id: "prop-clearing" },
+      legs: [{ kind: "cash", id: "wallet", amount: 500, currency: "KHR", fxRate: 4000 }],
+      categoryId: "in-invest", tagIds: [], createdAt: 1,
+    }, true)).toEqual([{ kind: "cash", id: "wallet", delta: -500 }]);
+  });
+});
