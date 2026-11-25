@@ -441,7 +441,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!tx) return;
 
       const legacySnapshot = tx.type === "transfer" &&
-        /^\\d{4}-\\d{2}-\\d{2} 투자 (입금|출금)$/.test(tx.memo ?? "");
+        /^\d{4}-\d{2}-\d{2} 투자 (입금|출금)$/.test(tx.memo ?? "");
       if (tx.snapshotId || legacySnapshot)
         throw new Error("투자 스냅샷에서 자동 생성된 이체입니다. 거래 내역에서 따로 삭제하지 말고 해당 스냅샷을 수정하세요.");
 
