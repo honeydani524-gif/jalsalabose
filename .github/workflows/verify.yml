@@ -63,7 +63,7 @@ jobs:
 
       - name: Setup Android SDK
         if: hashFiles('capacitor.config.ts') != ''
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install Android SDK packages
         if: hashFiles('capacitor.config.ts') != ''
