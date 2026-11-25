@@ -39,3 +39,21 @@ export function investmentTradePnl(
 ): number {
   return endingBalance - previousBalance - deposit + withdrawal;
 }
+
+export type HistoricalRate = { base: string; rate: number; effectiveAt: number };
+
+/** Latest known 1 USD = currency rate at the transaction timestamp. */
+export function rateAt(
+  currency: string,
+  timestamp: number,
+  history: HistoricalRate[],
+  fallbackRates: Record<string, number>,
+): number {
+  if (!currency || currency === "USD") return 1;
+  const historical = history
+    .filter((item) => item.base === currency && item.effectiveAt <= timestamp && item.rate > 0)
+    .sort((a, b) => b.effectiveAt - a.effectiveAt)[0];
+  const fallback = fallbackRates[currency];
+  const value = historical?.rate ?? fallback;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 1;
+}
