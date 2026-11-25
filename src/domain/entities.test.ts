@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { casinoSessionTotals } from "./entities";
+import { casinoSessionTotals, transactionReversalDeltas } from "./entities";
 
 describe("casino session currency accounting", () => {
   it("converts each Buy-in and Cash-out using its stored transaction FX", () => {
@@ -82,5 +82,43 @@ describe("casino session uses its persisted first-buy-in currency", () => {
     const totals = casinoSessionTotals("s2", buyIns, cashOuts, session);
     expect(totals.currency).toBe("KHR");
     expect(totals.open).toBe(600000);
+  });
+});
+
+
+describe("transaction deletion balance reversal", () => {
+  it("reverses income and expense in the linked account currency", () => {
+    expect(transactionReversalDeltas({
+      id: "income", type: "income", amount: 75, currency: "USD", fxRate: 1,
+      amountBase: 75, date: 1, accountId: "a1", tagIds: [], createdAt: 1,
+    })).toEqual([{ kind: "account", id: "a1", delta: -75 }]);
+    expect(transactionReversalDeltas({
+      id: "expense", type: "expense", amount: 20, currency: "USD", fxRate: 1,
+      amountBase: 20, date: 1, accountId: "a1", tagIds: [], createdAt: 1,
+    })).toEqual([{ kind: "account", id: "a1", delta: 20 }]);
+  });
+
+  it("reverses every leg of a multi-destination transfer", () => {
+    expect(transactionReversalDeltas({
+      id: "transfer", type: "transfer", amount: 100, currency: "USD", fxRate: 1,
+      amountBase: 100, date: 1, from: { kind: "account", id: "source" },
+      legs: [
+        { kind: "account", id: "target-krw", amount: 60000 },
+        { kind: "cash", id: "target-khr", amount: 160000 },
+      ],
+      tagIds: [], createdAt: 1,
+    })).toEqual([
+      { kind: "account", id: "source", delta: 100 },
+      { kind: "account", id: "target-krw", delta: -60000 },
+      { kind: "cash", id: "target-khr", delta: -160000 },
+    ]);
+  });
+
+  it("reverses positive and negative balance adjustments", () => {
+    expect(transactionReversalDeltas({
+      id: "adjust", type: "adjust", amount: -30, currency: "USD", fxRate: 1,
+      amountBase: -30, date: 1, from: { kind: "cash", id: "safe" },
+      tagIds: [], createdAt: 1,
+    })).toEqual([{ kind: "cash", id: "safe", delta: 30 }]);
   });
 });
