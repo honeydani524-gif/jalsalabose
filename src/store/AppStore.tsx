@@ -872,6 +872,11 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (input.totalAmount <= 0 || input.fee < 0 || input.fee > input.totalAmount)
         throw new Error("Cash-out 금액 또는 수수료를 확인하세요.");
       if (input.legs.length === 0) throw new Error("도착지를 추가하세요.");
+      const currentSessionTotals = casinoSessionTotals(
+        session.id, d.casinoBuyIns, d.casinoCashOuts,
+      );
+      if (input.totalAmount > currentSessionTotals.open + 0.01)
+        throw new Error("Cash-out 금액이 현재 미정산 칩보다 큽니다.");
 
       const sessionFxRate =
         session.fxRate ??
@@ -938,6 +943,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const ses = d.casinoSessions.find((s) => s.id === id);
       if (!ses) return { ok: false, message: "세션을 찾을 수 없습니다." };
       const open = casinoSessionTotals(id, d.casinoBuyIns, d.casinoCashOuts).open;
+      if (open < -0.01)
+        return { ok: false, message: "Cash-out 금액이 Buy-in 칩 잔액을 초과했습니다. 거래 내역을 확인하세요." };
       if (open > 1e-6 && !force)
         return { ok: false, message: `정산되지 않은 금액 ${open} 이 있습니다. Cash-out을 먼저 기록하세요.` };
 
