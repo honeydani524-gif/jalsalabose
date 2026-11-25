@@ -436,8 +436,24 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const d = ref.current;
       if (!d) return;
       const row = { ...d.settings, ...patch, id: "settings" } as Settings & { id: string };
-      const next = { ...d, settings: row } as Data;
-      await commit(next, [["kv", row]]);
+      const next: Data = { ...d, settings: row };
+      const persist: Persist = [["kv", row]];
+      if (patch.rates) {
+        const effectiveAt = Date.now();
+        const newRates = Object.entries(patch.rates)
+          .filter(([currency, rate]) => currency !== "USD" && d.settings.rates[currency] !== rate)
+          .map(([currency, rate]) => ({
+            id: `rate-${currency}-${effectiveAt}`,
+            base: currency,
+            rate,
+            effectiveAt,
+            source: "manual" as const,
+            memo: "설정에서 변경",
+          }));
+        next.exchangeRates = [...d.exchangeRates, ...newRates];
+        newRates.forEach((rate) => persist.push(["exchangeRates", rate]));
+      }
+      await commit(next, persist);
     },
     [commit],
   );
@@ -1136,12 +1152,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
       const meta = parsed.meta as { app?: string; schemaVersion?: number } | undefined;
       if (!meta || meta.app !== "JalSalAboSe") throw new Error("잘살아보세 백업 파일이 아닙니다.");
-      if (meta.schemaVersion !== undefined && typeof meta.schemaVersion !== "number")
-        throw new Error("백업 데이터 버전 정보가 올바르지 않습니다.");
-      if (typeof meta.schemaVersion === "number" && meta.schemaVersion > 1)
-        throw new Error("이 앱보다 높은 데이터 버전입니다. 앱을 먼저 업그레이드하세요.");
-      if (typeof meta.schemaVersion === "number" && meta.schemaVersion < 1)
-        throw new Error("지원하지 않는 백업 데이터 버전입니다.");
+      if (meta.schemaVersion !== 1)
+        throw new Error("지원하지 않는 백업 데이터 버전입니다. 최신 앱에서 다시 내보내세요.");
+      if (parsed.meta && isRecord(parsed.meta) && parsed.meta.backupVersion !== 1)
+        throw new Error("지원하지 않는 백업 파일 버전입니다.");
 
       const isRecord = (value: unknown): value is Record<string, unknown> =>
         !!value && typeof value === "object" && !Array.isArray(value);
@@ -1188,9 +1202,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const normalized = {} as Record<StoreName, { id: string }[]>;
       for (const store of STORE_LIST) {
         const raw = parsed[store];
-        if (raw !== undefined && !Array.isArray(raw))
-          throw new Error(`백업의 ${store} 데이터가 배열이 아닙니다.`);
-        const rows = (Array.isArray(raw) ? raw : []) as unknown[];
+        if (!Array.isArray(raw))
+          throw new Error(`백업에 필수 데이터 ${store} 배열이 없거나 올바르지 않습니다. 기존 데이터는 변경되지 않았습니다.`);
+        const rows = raw as unknown[];
         const seen = new Set<string>();
         normalized[store] = rows.map((row, index) => {
           if (!isRecord(row) || typeof row.id !== "string" || !row.id.trim())
@@ -1219,8 +1233,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         });
       }
 
-      if (normalized.kv.length > 1)
-        throw new Error("설정 데이터가 여러 개 포함되어 있습니다.");
+      if (normalized.kv.length !== 1)
+        throw new Error("백업에 설정 데이터가 정확히 하나 포함되어야 합니다.");
       const settingsRow = normalized.kv[0] as (Settings & { id: string }) | undefined;
       if (settingsRow && settingsRow.id !== "settings")
         throw new Error("설정 데이터 ID가 올바르지 않습니다.");
