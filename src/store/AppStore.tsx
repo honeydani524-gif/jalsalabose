@@ -495,13 +495,39 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         if (!input.accountId) throw new Error("계좌를 선택하세요.");
         if (input.amount <= 0) throw new Error("금액은 0보다 커야 합니다.");
       }
+      let normalizedLegs: Leg[] | undefined;
       if (input.type === "transfer") {
         if (!input.from) throw new Error("출발 자산을 선택하세요.");
+        if (input.amount <= 0) throw new Error("출발 금액은 0보다 커야 합니다.");
+        const sourceRow = input.from.kind === "account"
+          ? d.accounts.find((a) => a.id === input.from!.id)
+          : d.cashLocations.find((a) => a.id === input.from!.id);
+        if (!sourceRow) throw new Error("출발 자산을 찾을 수 없습니다.");
+        if (sourceRow.currency !== input.currency)
+          throw new Error("출발 자산의 통화가 입력한 통화와 다릅니다.");
         const legs = input.legs ?? [];
         if (legs.length === 0) throw new Error("도착 자산을 추가하세요.");
-        const total = legs.reduce((s, l) => s + l.amount, 0);
-        if (Math.abs(total - input.amount) > 1e-6)
-          throw new Error(`도착 합계(${total})가 출발 금액(${input.amount})과 다릅니다.`);
+        normalizedLegs = legs.map((leg) => {
+          if (leg.amount <= 0) throw new Error("도착 금액은 0보다 커야 합니다.");
+          const destination = leg.kind === "account"
+            ? d.accounts.find((a) => a.id === leg.id)
+            : d.cashLocations.find((a) => a.id === leg.id);
+          if (!destination) throw new Error("도착 자산을 찾을 수 없습니다.");
+          if (input.from!.kind === leg.kind && input.from!.id === leg.id)
+            throw new Error("출발 자산과 도착 자산은 달라야 합니다.");
+          const currency = destination.currency;
+          const fxRate = rateOf(d.settings, currency);
+          return {
+            ...leg,
+            currency,
+            fxRate,
+            amountBase: round(toBase(leg.amount, currency, d.settings), 6),
+          };
+        });
+        const sourceBase = toBase(input.amount, input.currency, d.settings);
+        const destinationBase = normalizedLegs.reduce((sum, leg) => sum + (leg.amountBase ?? 0), 0);
+        if (Math.abs(sourceBase - destinationBase) > 0.01)
+          throw new Error(`환산 기준 도착 합계(${round(destinationBase, 6)})가 출발 금액(${round(sourceBase, 6)})과 다릅니다.`);
         assertBalance(d, input.from.kind, input.from.id, input.amount);
       }
 
@@ -516,7 +542,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         date: input.date,
         accountId: input.accountId,
         from: input.from,
-        legs: input.legs,
+        legs: normalizedLegs ?? input.legs,
         categoryId: input.categoryId,
         tagIds: input.tagIds ?? [],
         memo: input.memo,
@@ -537,7 +563,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }
       if (input.type === "transfer" && input.from) {
         next = bumpRel(next, input.from.kind, input.from.id, -input.amount, pers);
-        input.legs!.forEach((l) => {
+        normalizedLegs!.forEach((l) => {
           next = bumpRel(next, l.kind, l.id, l.amount, pers);
         });
       }
