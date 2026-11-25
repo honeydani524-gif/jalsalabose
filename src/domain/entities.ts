@@ -4,6 +4,7 @@
    netWorth 에 합산하지 않는다. 이 파일이 유일한 판단 기준이다.
    ──────────────────────────────────────────────────────────── */
 import { round, toBase, type Settings } from "./calc";
+import { toSessionCurrency } from "./finance";
 
 export type RelKind = "account" | "cash" | "crypto";
 
@@ -251,6 +252,32 @@ export function cryptoTotalBase(assets: Asset[], prices: Price[], settings: Sett
   return round(assets.reduce((s, a) => s + toBase(a.quantity * assetPrice(a, prices), "USD", settings), 0), 6);
 }
 
+/* ── 세션 통화 기준 금액 (과거 데이터 호환) ─────────────── */
+export function casinoSessionTotals(
+  sessionId: string,
+  buyIns: BuyIn[],
+  cashOuts: CashOut[],
+): { currency: string; buyIn: number; cashOut: number; open: number } {
+  const sessionBuyIns = buyIns.filter((b) => b.sessionId === sessionId).sort((a, b) => a.date - b.date);
+  const sessionCashOuts = cashOuts.filter((c) => c.sessionId === sessionId);
+  const first = sessionBuyIns[0];
+  const currency = first?.currency ?? "USD";
+  const sessionFxRate = first?.fxRate ?? 1;
+  const buyIn = sessionBuyIns.reduce(
+    (sum, b) => sum + (typeof b.sessionAmount === "number"
+      ? b.sessionAmount
+      : toSessionCurrency(b.amount, b.fxRate || sessionFxRate, sessionFxRate)),
+    0,
+  );
+  const cashOut = sessionCashOuts.reduce(
+    (sum, c) => sum + (typeof c.sessionAmount === "number"
+      ? c.sessionAmount
+      : toSessionCurrency(c.totalAmount, c.fxRate || sessionFxRate, sessionFxRate)),
+    0,
+  );
+  return { currency, buyIn: round(buyIn, 6), cashOut: round(cashOut, 6), open: round(buyIn - cashOut, 6) };
+}
+
 /* ── 진행 중 칩 (미정산) ────────────────────────────────── */
 export function ongoingChipBase(
   sessionId: string,
@@ -258,9 +285,8 @@ export function ongoingChipBase(
   cashOuts: CashOut[],
   settings: Settings,
 ): number {
-  const bi = buyIns.filter((b) => b.sessionId === sessionId).reduce((s, b) => s + b.amount, 0);
-  const co = cashOuts.filter((c) => c.sessionId === sessionId).reduce((s, c) => s + c.totalAmount, 0);
-  return round(toBase(Math.max(0, bi - co), buyIns.find((b) => b.sessionId === sessionId)?.currency ?? settings.base, settings), 6);
+  const totals = casinoSessionTotals(sessionId, buyIns, cashOuts);
+  return round(toBase(Math.max(0, totals.open), totals.currency, settings), 6);
 }
 
 /* ── 순자산 ────────────────────────────────────────────── */
