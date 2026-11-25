@@ -60,6 +60,7 @@ export default function SettingsScreen() {
   };
 
   const applyRates = async () => {
+    try {
     const next = { ...s, rates };
     const before = nw.total;
     const after = computeNetWorth({ ...data, settings: next }).total;
@@ -82,6 +83,9 @@ export default function SettingsScreen() {
         s.base,
       )}) · 과거 거래의 당시 환산 금액은 그대로 유지됩니다.`,
     );
+    } catch (e) {
+      setMsg(`환율 적용 실패: ${(e as Error).message}`);
+    }
   };
 
   const counts = STORE_LIST.map((st) => ({
