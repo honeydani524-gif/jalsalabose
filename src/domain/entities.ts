@@ -66,6 +66,7 @@ export type Leg = {
   currency?: string;
   fxRate?: number;
   amountBase?: number;
+  baseCurrency?: string;
 };
 
 export type TxType = "income" | "expense" | "transfer" | "casino" | "adjust";
@@ -76,6 +77,7 @@ export type Tx = {
   currency: string;
   fxRate: number;
   amountBase: number;
+  baseCurrency?: string;
   date: number;
   accountId?: string;
   from?: { kind: "account" | "cash"; id: string };
