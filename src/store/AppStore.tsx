@@ -802,13 +802,17 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         throw new Error("종료된 세션에는 Buy-in을 추가할 수 없습니다.");
       }
 
-      const sourceRow = input.from.kind === "account"
-        ? d.accounts.find((a) => a.id === input.from.id)
+      const sourceExists = input.from.kind === "account"
+        ? d.accounts.some((a) => a.id === input.from.id)
         : input.from.kind === "cash"
-          ? d.cashLocations.find((a) => a.id === input.from.id)
-          : d.cryptoWallets.find((a) => a.id === input.from.id);
-      if (!sourceRow) throw new Error("Buy-in 출발 자산을 찾을 수 없습니다.");
-      const sourceCurrency = input.from.kind === "crypto" ? "USD" : sourceRow.currency;
+          ? d.cashLocations.some((a) => a.id === input.from.id)
+          : d.cryptoWallets.some((a) => a.id === input.from.id);
+      if (!sourceExists) throw new Error("Buy-in 출발 자산을 찾을 수 없습니다.");
+      const sourceCurrency = input.from.kind === "crypto"
+        ? "USD"
+        : input.from.kind === "account"
+          ? d.accounts.find((a) => a.id === input.from.id)!.currency
+          : d.cashLocations.find((a) => a.id === input.from.id)!.currency;
       if (sourceCurrency !== input.currency)
         throw new Error("Buy-in 금액 통화가 출발 자산 통화와 다릅니다.");
 
@@ -877,13 +881,17 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const cashOutFxRate = rateAtTx(d, input.currency, input.date);
       const enrichedLegs = input.legs.map((leg) => {
         if (leg.amount <= 0) throw new Error("도착 금액은 0보다 커야 합니다.");
-        const destination = leg.kind === "account"
-          ? d.accounts.find((a) => a.id === leg.id)
+        const destinationExists = leg.kind === "account"
+          ? d.accounts.some((a) => a.id === leg.id)
           : leg.kind === "cash"
-            ? d.cashLocations.find((a) => a.id === leg.id)
-            : d.cryptoWallets.find((a) => a.id === leg.id);
-        if (!destination) throw new Error("Cash-out 도착 자산을 찾을 수 없습니다.");
-        const currency = leg.kind === "crypto" ? "USD" : destination.currency;
+            ? d.cashLocations.some((a) => a.id === leg.id)
+            : d.cryptoWallets.some((a) => a.id === leg.id);
+        if (!destinationExists) throw new Error("Cash-out 도착 자산을 찾을 수 없습니다.");
+        const currency = leg.kind === "crypto"
+          ? "USD"
+          : leg.kind === "account"
+            ? d.accounts.find((a) => a.id === leg.id)!.currency
+            : d.cashLocations.find((a) => a.id === leg.id)!.currency;
         const fxRate = rateAtTx(d, currency, input.date);
         return {
           ...leg,
