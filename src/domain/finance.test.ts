@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  amountAtBaseCurrency,
   convertAtRates,
   investmentTradePnl,
   netPayoutAfterUsdFee,
@@ -58,5 +59,23 @@ describe("prop payout net receipt", () => {
 
   it("rejects negative or invalid fee inputs", () => {
     expect(() => netPayoutAfterUsdFee(100, 4_000, -1)).toThrow();
+  });
+});
+
+
+describe("historical transaction display currency", () => {
+  const history = [
+    { base: "KRW", rate: 1400, effectiveAt: 100 },
+    { base: "KHR", rate: 4000, effectiveAt: 100 },
+    { base: "KHR", rate: 4100, effectiveAt: 200 },
+  ];
+
+  it("converts a saved transaction into the selected base using rates effective on its date", () => {
+    expect(amountAtBaseCurrency(140000, "KRW", 1400, 250, "KHR", history, { KHR: 5000 })).toBe(410000);
+    expect(amountAtBaseCurrency(140000, "KRW", 1400, 250, "USD", history, { USD: 1 })).toBe(100);
+  });
+
+  it("falls back to the transaction-date source rate for legacy rows without fxRate", () => {
+    expect(amountAtBaseCurrency(140000, "KRW", undefined, 150, "KHR", history, { KRW: 1, KHR: 5000 })).toBe(400000);
   });
 });
