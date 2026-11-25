@@ -58,6 +58,27 @@ export function rateAt(
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 1;
 }
 
+
+/** Convert a historical transaction amount into the currently selected display base. */
+export function amountAtBaseCurrency(
+  amount: number,
+  transactionCurrency: string,
+  transactionFxRate: number | undefined,
+  timestamp: number,
+  displayBaseCurrency: string,
+  history: HistoricalRate[],
+  fallbackRates: Record<string, number>,
+): number {
+  if (!Number.isFinite(amount) || !Number.isFinite(timestamp))
+    throw new Error("거래 금액 또는 날짜가 올바르지 않습니다.");
+  const sourceRate = typeof transactionFxRate === "number" &&
+    Number.isFinite(transactionFxRate) && transactionFxRate > 0
+    ? transactionFxRate
+    : rateAt(transactionCurrency, timestamp, history, fallbackRates);
+  const displayRate = rateAt(displayBaseCurrency, timestamp, history, fallbackRates);
+  return Math.round(((amount / sourceRate) * displayRate) * 1e6) / 1e6;
+}
+
 /** Convert a USD-denominated payout fee into the payout currency and subtract it. */
 export function netPayoutAfterUsdFee(
   grossAmount: number,
