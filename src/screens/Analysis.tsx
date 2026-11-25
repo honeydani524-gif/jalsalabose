@@ -292,7 +292,10 @@ export function AnalysisScreen() {
           )}
           <div className="mt-3 rounded-xl bg-[#fef4e6] px-3 py-2 font-mono text-[11.5px] text-ink/70">
             실제 지급 수익 합계{" "}
-            <b>{fmtAmount(sum(data.propPayouts.map((x) => amountAtBaseCurrency(x.amount, x.currency, x.fxRate, x.receivedAt, s.base, data.exchangeRates, s.rates))), s.base)}</b> (수령 계좌에 반영됨)
+            <b>{fmtAmount(sum(data.propPayouts.map((x) => amountAtBaseCurrency(
+              Math.max(0, x.amount - (x.fee || 0) * (x.fxRate || 1)),
+              x.currency, x.fxRate, x.receivedAt, s.base, data.exchangeRates, s.rates,
+            ))), s.base)}</b> (수령 계좌에 반영됨)
           </div>
         </Card>
 
@@ -439,7 +442,10 @@ export function AIScreen() {
         L.push(`- ${p.firm} ${p.alias}: 명목 $${p.nominalSize.toLocaleString()}, 평가잔액 $${p.balance.toLocaleString()} (${fmtPct(p.opening ? (p.balance - p.opening) / p.opening : 0)}), 상태 ${p.status}, 목표 $${(p.target ?? 0).toLocaleString()}, 일한 최대 손실 한도 $${(p.maxDailyLoss ?? 0).toLocaleString()}`);
       });
       const paid = sum(data.propPayouts.filter((p) => p.receivedAt >= from).map((p) =>
-        amountAtBaseCurrency(p.amount, p.currency, p.fxRate, p.receivedAt, s.base, data.exchangeRates, s.rates),
+        amountAtBaseCurrency(
+          Math.max(0, p.amount - (p.fee || 0) * (p.fxRate || 1)),
+          p.currency, p.fxRate, p.receivedAt, s.base, data.exchangeRates, s.rates,
+        ),
       ));
       L.push(`- 기간 내 실제 지급받은 수익: ${fmt(paid)} (이것만 실제 자산에 반영됨)`);
       L.push(`- 미수령 가능 금액: ${fmt(sum(data.propAccounts.map((p) => p.payoutRequested)))} (순자산에서 제외)`);
