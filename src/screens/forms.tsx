@@ -402,6 +402,8 @@ function SnapshotForm({ onClose }: { onClose: () => void }) {
   const [dep, setDep] = useState<number | "">(0);
   const [wd, setWd] = useState<number | "">(0);
   const [fromId, setFromId] = useState("");
+  const fromKind = fromId.startsWith("cash:") ? "cash" : "account";
+  const selectedFromId = fromId ? fromId.slice(fromId.indexOf(":") + 1) : "";
   const [memo, setMemo] = useState("");
   const [err, setErr] = useState<string | null>(null);
 
@@ -428,8 +430,8 @@ function SnapshotForm({ onClose }: { onClose: () => void }) {
         deposit: Number(dep) || 0,
         withdrawal: Number(wd) || 0,
         memo: memo || undefined,
-        fromId: fromId || undefined,
-        fromKind: "account",
+        fromId: selectedFromId || undefined,
+        fromKind,
       });
       onClose();
     } catch (e) {
