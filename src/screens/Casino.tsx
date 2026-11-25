@@ -6,6 +6,7 @@ import { fmtAmount, fmtDate, fmtDateTime, round, toBase } from "../domain/calc";
 import { rateAt as historicalRateAt, toSessionCurrency } from "../domain/finance";
 import { uid } from "../data/db";
 import { casinoSessionTotals, type RelKind } from "../domain/entities";
+import { amountAtBaseCurrency } from "../domain/finance";
 
 /* ── Cash-out (분할 수령) ────────────────────────────── */
 function CashOutForm({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
@@ -351,9 +352,14 @@ export default function CasinoScreen() {
         const ids = new Set(sessions.map((s) => s.id));
         const ins = data.casinoBuyIns.filter((b) => ids.has(b.sessionId));
         const outs = data.casinoCashOuts.filter((o) => ids.has(o.sessionId));
-        const usdToBase = toBase(1, "USD", data.settings);
-        const totalIn = ins.reduce((s, b) => s + (b.amount + (b.fee || 0)) / (b.fxRate || 1), 0) * usdToBase;
-        const totalOut = outs.reduce((s, o) => s + (o.totalAmount - (o.fee || 0)) / (o.fxRate || 1), 0) * usdToBase;
+        const totalIn = ins.reduce((sum, b) => sum + amountAtBaseCurrency(
+          b.amount + (b.fee || 0), b.currency, b.fxRate, b.date,
+          data.settings.base, data.exchangeRates, data.settings.rates,
+        ), 0);
+        const totalOut = outs.reduce((sum, o) => sum + amountAtBaseCurrency(
+          o.totalAmount - (o.fee || 0), o.currency, o.fxRate, o.date,
+          data.settings.base, data.exchangeRates, data.settings.rates,
+        ), 0);
         return {
           c,
           visits: sessions.length,
@@ -363,7 +369,7 @@ export default function CasinoScreen() {
           pnl: round(totalOut - totalIn, 6),
         };
       }),
-    [data.casinos, data.casinoSessions, data.casinoBuyIns, data.casinoCashOuts, data.settings],
+    [data.casinos, data.casinoSessions, data.casinoBuyIns, data.casinoCashOuts, data.exchangeRates, data.settings],
   );
 
   const ongoingSessions = data.casinoSessions.filter((s) => s.status === "ongoing");
