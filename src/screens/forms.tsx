@@ -492,12 +492,12 @@ function SnapshotForm({ onClose }: { onClose: () => void }) {
                 {data.accounts
                   .filter((a) => a.id !== accountId && !a.archivedAt)
                   .map((a) => (
-                    <option key={a.id} value={a.id}>
+                    <option key={a.id} value={`account:${a.id}`}>
                       {a.alias}
                     </option>
                   ))}
                 {data.cashLocations.map((c) => (
-                  <option key={c.id} value={c.id}>
+                  <option key={c.id} value={`cash:${c.id}`}>
                     {c.name}
                   </option>
                 ))}
