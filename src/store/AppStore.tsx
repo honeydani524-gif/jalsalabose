@@ -570,8 +570,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         throw new Error("지원하지 않는 기준 통화입니다.");
       Object.entries(mergedRates).forEach(([currency, rate]) => {
         if (!["USD", "KRW", "KHR"].includes(currency) ||
-            typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0)
-          throw new Error(`${currency} 환율은 지원 통화의 0보다 큰 숫자여야 합니다.`);
+            typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0 ||
+            (currency === "USD" && rate !== 1))
+          throw new Error(`${currency} 환율은 지원 통화의 0보다 큰 숫자여야 하며 USD는 1이어야 합니다.`);
       });
       const row = { ...d.settings, ...patch, rates: mergedRates, id: "settings" } as Settings & { id: string };
       const next: Data = { ...d, settings: row };
@@ -1271,7 +1272,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         backupVersion: 1,
         exportedAt: new Date().toISOString(),
         counts: Object.fromEntries(
-          STORE_LIST.map((s) => [s, ((d as unknown as Record<string, unknown[]>)[s] ?? []).length]),
+          STORE_LIST.map((s) => [
+            s,
+            s === "kv" ? 1 : ((d as unknown as Record<string, unknown[]>)[s] ?? []).length,
+          ]),
         ),
       },
     };
@@ -1423,7 +1427,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         }
       }
       Object.entries(settings.rates).forEach(([currency, rate]) => {
-        if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0)
+        if (!supportedCurrencies.has(currency) ||
+            typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0 ||
+            (currency === "USD" && rate !== 1))
           throw new Error(`${currency} 환율 설정이 올바르지 않습니다.`);
       });
       normalized.kv = [{ id: "settings", ...settings }];
