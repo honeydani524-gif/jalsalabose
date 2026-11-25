@@ -356,7 +356,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     (async () => {
       try {
         const rows = await Promise.all(
-          STORE_LIST.map((s) => allRows<never>(s).catch(() => [] as never[])),
+          STORE_LIST.map((s) => allRows<never>(s)),
         );
         const map = Object.fromEntries(STORE_LIST.map((s, i) => [s, rows[i]])) as unknown as Record<
           StoreName,
