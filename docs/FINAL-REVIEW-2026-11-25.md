@@ -16,6 +16,7 @@
 | Prop payouts | USD-denominated fees were not deducted from credited payouts and FX could use current rather than receipt-time rates. | Convert the fee at the payout-date rate, credit the net amount, persist historical FX, and link payout rows to their generated transactions. |
 | Investment snapshot editing | Reversing old snapshot flows could update source balances in memory without persisting them. | Persist every reversed source/destination balance in the same transaction. |
 | Transaction deletion | Deleting a ledger row removed only the transaction record, leaving cached asset balances unchanged. | Reverse the transaction's native-currency balance effects and delete the row atomically; protect snapshot-generated rows and safely unlink new prop payouts. |
+| Base-currency changes | Historical transaction `amountBase` values could be summed as though they used the newly selected display currency. | Convert stored transaction-time base snapshots into the current display base using the historical FX table; fall back to each transaction's stored FX for legacy rows. |
 | Backup restore | Missing store arrays or malformed values could risk destructive replacement. | Validate required stores, IDs, financial fields, settings, and casino legs before one atomic replacement. |
 | IndexedDB writes | A synchronous object-store write exception could leave earlier queued writes eligible to commit. | Abort the whole transaction on synchronous errors in batch and replace operations. |
 | Exchange-rate settings | Rate-history rows and settings could be persisted separately. | Save settings and all new rate-history rows in one multi-store transaction. |
@@ -37,6 +38,8 @@ The latest code verification completed successfully at commit `7bc3dac31b6b21980
 - TypeScript check: passed
 - Vite production build: passed
 - Android APK job: skipped by design
+
+A later code-review pass added balance-aware transaction deletion and historical transaction display conversion across base-currency changes. These changes are being re-verified by the current workflow run.
 
 This verification does not certify Android installation or physical-device behavior.
 
