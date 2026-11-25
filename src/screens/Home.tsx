@@ -29,9 +29,9 @@ export default function HomeScreen() {
     () =>
       data.nwHistory.map((p) => ({
         ...p,
-        v: (p.value / rateOf(s, p.base)) * rateOf(s, s.base),
+        v: amountAtBaseCurrency(p.value, p.base, 1, p.t, s.base, data.exchangeRates, s.rates, p.value, p.base),
       })),
-    [data.nwHistory, s],
+    [data.nwHistory, data.exchangeRates, s],
   );
 
   const thisMonth = monthKey(Date.now());
@@ -67,8 +67,8 @@ export default function HomeScreen() {
     const prev = data.nwHistory.filter((p) => p.t < todayStart.getTime());
     if (prev.length === 0) return null;
     const p = prev[prev.length - 1];
-    return (nw.total - p.value / rateOf(s, p.base) * rateOf(s, s.base));
-  }, [data.nwHistory, nw.total, s]);
+    return nw.total - amountAtBaseCurrency(p.value, p.base, 1, p.t, s.base, data.exchangeRates, s.rates, p.value, p.base);
+  }, [data.nwHistory, data.exchangeRates, nw.total, s]);
 
   /* 자산 요약 */
   const cashWallet = sum(
