@@ -686,14 +686,17 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!row) return;
       const delta = round(next - row.balance, 6);
       if (delta === 0) return;
+      const date = Date.now();
+      const fxRate = rateAtTx(d, row.currency, date);
       const tx: Tx = {
         id: uid(),
         type: "adjust",
         amount: delta,
         currency: row.currency,
-        fxRate: rateOf(d.settings, row.currency),
-        amountBase: round(toBase(delta, row.currency, d.settings), 6),
-        date: Date.now(),
+        fxRate,
+        amountBase: toBaseAtTx(d, delta, row.currency, date),
+        baseCurrency: d.settings.base,
+        date,
         from: { kind, id },
         tagIds: [],
         reason,
@@ -1438,8 +1441,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         type: isIncome ? "income" : "expense",
         amount,
         currency: a.currency,
-        fxRate: rateOf(d.settings, a.currency),
-        amountBase: toBase(amount, a.currency, d.settings),
+        fxRate: rateAtTx(d, a.currency, date),
+        amountBase: toBaseAtTx(d, amount, a.currency, date),
+        baseCurrency: d.settings.base,
         date,
         accountId: a.id,
         categoryId: category?.id,
