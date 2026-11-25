@@ -352,8 +352,8 @@ export default function CasinoScreen() {
         const ins = data.casinoBuyIns.filter((b) => ids.has(b.sessionId));
         const outs = data.casinoCashOuts.filter((o) => ids.has(o.sessionId));
         const usdToBase = toBase(1, "USD", data.settings);
-        const totalIn = ins.reduce((s, b) => s + b.amount / (b.fxRate || 1), 0) * usdToBase;
-        const totalOut = outs.reduce((s, o) => s + o.totalAmount / (o.fxRate || 1), 0) * usdToBase;
+        const totalIn = ins.reduce((s, b) => s + (b.amount + (b.fee || 0)) / (b.fxRate || 1), 0) * usdToBase;
+        const totalOut = outs.reduce((s, o) => s + (o.totalAmount - (o.fee || 0)) / (o.fxRate || 1), 0) * usdToBase;
         return {
           c,
           visits: sessions.length,
