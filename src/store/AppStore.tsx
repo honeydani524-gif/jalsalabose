@@ -930,9 +930,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!d) return { ok: false };
       const ses = d.casinoSessions.find((s) => s.id === id);
       if (!ses) return { ok: false, message: "세션을 찾을 수 없습니다." };
-      const bi = d.casinoBuyIns.filter((b) => b.sessionId === id).reduce((s, b) => s + b.amount, 0);
-      const co = d.casinoCashOuts.filter((c) => c.sessionId === id).reduce((s, c) => s + c.totalAmount, 0);
-      const open = round(bi - co, 6);
+      const open = casinoSessionTotals(id, d.casinoBuyIns, d.casinoCashOuts).open;
       if (open > 1e-6 && !force)
         return { ok: false, message: `정산되지 않은 금액 ${open} 이 있습니다. Cash-out을 먼저 기록하세요.` };
 
