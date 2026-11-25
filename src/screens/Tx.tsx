@@ -12,7 +12,7 @@ type Kind = "all" | "income" | "expense" | "transfer";
 export default function TxScreen() {
   const { data, removeTransaction } = useStore();
   const txBase = (t: Tx) => amountAtBaseCurrency(
-    t.amount, t.currency, t.fxRate, t.date, data.settings.base, data.exchangeRates, data.settings.rates,
+    t.amount, t.currency, t.fxRate, t.date, data.settings.base, data.exchangeRates, data.settings.rates, t.amountBase, t.baseCurrency,
   );
   const quick = useQuick();
   const [range, setRange] = useState<Range>("month");
