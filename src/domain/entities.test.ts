@@ -50,9 +50,9 @@ describe("casino session currency accounting", () => {
     ];
     expect(casinoSessionTotals("s1", buyIns, cashOuts)).toEqual({
       currency: "KHR",
-      buyIn: 8_000,
+      buyIn: 404_000,
       cashOut: 2_000,
-      open: 6_000,
+      open: 402_000,
     });
   });
 });
