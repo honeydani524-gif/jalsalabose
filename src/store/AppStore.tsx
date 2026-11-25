@@ -643,6 +643,12 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (input.fromId && input.fromKind === "account" && input.fromId === input.accountId)
         throw new Error("투자 계좌 자신을 자금 이동 대상으로 선택할 수 없습니다.");
 
+      const previousSnapshot = d.invSnapshots
+        .filter((s) => s.accountId === input.accountId && s.date < input.date)
+        .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+      const previousBalance = previousSnapshot?.endBalance ?? acc.openingBalance;
+      if (input.withdrawal > previousBalance + input.deposit + 1e-6)
+        throw new Error("이전 평가잔액과 입금액보다 큰 금액을 출금할 수 없습니다.");
       const existing = d.invSnapshots.find(
         (s) => s.accountId === input.accountId && s.date === input.date,
       );
@@ -678,6 +684,16 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           next = bumpRel(next, leg.kind, leg.id, -leg.amount, []);
         });
       });
+      // The snapshot's ending balance is authoritative, including when an older
+      // snapshot is edited and its previously generated flow rows are reversed.
+      next = {
+        ...next,
+        accounts: next.accounts.map((a) =>
+          a.id === input.accountId ? { ...a, balance: round(input.endBalance, 6) } : a,
+        ),
+      };
+      const authoritativeAccount = next.accounts.find((a) => a.id === input.accountId)!;
+      pers.push(["accounts", authoritativeAccount]);
 
       if ((input.deposit > 0 || input.withdrawal > 0) && input.fromId) {
         const fromKind = input.fromKind ?? "account";
@@ -687,21 +703,22 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
             : next.cashLocations.find((a) => a.id === input.fromId);
         if (!sourceRow) throw new Error("자금 이동 자산을 찾을 수 없습니다.");
         const sourceCurrency = sourceRow.currency;
-        const sourceFx = rateOf(d.settings, sourceCurrency);
-        const investmentFx = rateOf(d.settings, acc.currency);
         const txDate = new Date(`${input.date}T12:00:00`).getTime();
+        const sourceFx = rateAtTx(d, sourceCurrency, txDate);
+        const investmentFx = rateAtTx(d, acc.currency, txDate);
+        const baseFx = rateAtTx(d, d.settings.base, txDate);
 
         if (input.deposit > 0) {
           const sourceAmount = round(convertAtRates(input.deposit, investmentFx, sourceFx), 6);
           assertBalance(next, fromKind, input.fromId, sourceAmount);
           const tx: Tx = {
             id: uid(), type: "transfer", amount: sourceAmount, currency: sourceCurrency,
-            fxRate: sourceFx, amountBase: round(toBase(sourceAmount, sourceCurrency, d.settings), 6),
+            fxRate: sourceFx, amountBase: round((sourceAmount / sourceFx) * baseFx, 6),
             date: txDate, from: { kind: fromKind, id: input.fromId },
             legs: [{
               kind: "account", id: input.accountId, amount: round(input.deposit, 6),
               currency: acc.currency, fxRate: investmentFx,
-              amountBase: round(toBase(input.deposit, acc.currency, d.settings), 6),
+              amountBase: round((input.deposit / investmentFx) * baseFx, 6),
             }],
             tagIds: [], memo: `${input.date} 투자 입금`, snapshotId: snap.id, createdAt: Date.now(),
           };
@@ -711,16 +728,15 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         }
 
         if (input.withdrawal > 0) {
-          assertBalance(d, "account", input.accountId, input.withdrawal);
           const destinationAmount = round(convertAtRates(input.withdrawal, investmentFx, sourceFx), 6);
           const tx: Tx = {
             id: uid(), type: "transfer", amount: round(input.withdrawal, 6), currency: acc.currency,
-            fxRate: investmentFx, amountBase: round(toBase(input.withdrawal, acc.currency, d.settings), 6),
+            fxRate: investmentFx, amountBase: round((input.withdrawal / investmentFx) * baseFx, 6),
             date: txDate, from: { kind: "account", id: input.accountId },
             legs: [{
               kind: fromKind, id: input.fromId, amount: destinationAmount,
               currency: sourceCurrency, fxRate: sourceFx,
-              amountBase: round(toBase(destinationAmount, sourceCurrency, d.settings), 6),
+              amountBase: round((destinationAmount / sourceFx) * baseFx, 6),
             }],
             tagIds: [], memo: `${input.date} 투자 출금`, snapshotId: snap.id, createdAt: Date.now(),
           };
