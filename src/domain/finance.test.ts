@@ -72,7 +72,9 @@ describe("historical transaction display currency", () => {
 
   it("converts a saved transaction into the selected base using rates effective on its date", () => {
     expect(amountAtBaseCurrency(140000, "KRW", 1400, 250, "KHR", history, { KHR: 5000 })).toBe(410000);
-    expect(amountAtBaseCurrency(140000, "KRW", 1400, 250, "USD", history, { USD: 1 })).toBe(100);
+    expect(amountAtBaseCurrency(140000, "KRW", 1400, 250, "USD", history, { USD: 1 }, 100, "USD")).toBe(100);
+    expect(amountAtBaseCurrency(140000, "KRW", 1400, 250, "KHR", history, { KHR: 5000 }, 140000, "KRW")).toBe(410000);
+    expect(amountAtBaseCurrency(140000, "KRW", 1400, 250, "KRW", history, { KRW: 1 }, 140000, "KRW")).toBe(140000);
   });
 
   it("falls back to the transaction-date source rate for legacy rows without fxRate", () => {
