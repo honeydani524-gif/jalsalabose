@@ -235,8 +235,16 @@ function TransferForm({ onClose }: { onClose: () => void }) {
       : data.cashLocations.find((c) => c.id === from.id)
     : undefined;
   const currency = fromRow?.currency ?? "USD";
-  const legSum = round(legs.reduce((s, l) => s + (Number(l.amount) || 0), 0), 6);
-  const diff = round((Number(amount) || 0) - legSum, 6);
+  const legCurrency = (leg: (typeof legs)[number]) =>
+    leg.kind === "account"
+      ? data.accounts.find((a) => a.id === leg.id)?.currency ?? "USD"
+      : data.cashLocations.find((a) => a.id === leg.id)?.currency ?? "USD";
+  const sourceBase = toBase(Number(amount) || 0, currency, data.settings);
+  const legBase = round(
+    legs.reduce((sum, leg) => sum + toBase(Number(leg.amount) || 0, legCurrency(leg), data.settings), 0),
+    6,
+  );
+  const diff = round(sourceBase - legBase, 6);
 
   const setLeg = (i: number, patch: Partial<(typeof legs)[number]>) =>
     setLegs((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
@@ -247,7 +255,7 @@ function TransferForm({ onClose }: { onClose: () => void }) {
       if (!from?.id) throw new Error("출발 자산을 선택하세요.");
       if (!amount || amount <= 0) throw new Error("금액을 입력하세요.");
       if (legs.some((l) => !l.id)) throw new Error("도착 자산을 모두 선택하세요.");
-      if (Math.abs(diff) > 1e-6) throw new Error(`도착 합계가 출발 금액과 다릅니다. (차이 ${diff})`);
+      if (Math.abs(diff) > 0.01) throw new Error(`환산 후 도착 합계가 출발 금액과 다릅니다. (기준 통화 차이 ${fmtAmount(diff, data.settings.base)})`);
       await applyTx({
         type: "transfer",
         amount,
@@ -331,14 +339,17 @@ function TransferForm({ onClose }: { onClose: () => void }) {
                         </option>
                       ))}
                 </Select>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  value={l.amount || ""}
-                  placeholder="0"
-                  onChange={(e) => setLeg(i, { amount: Number(e.target.value) || 0 })}
-                  className="w-[104px] shrink-0 rounded-xl border border-rule px-2.5 py-2 text-right font-mono text-[14px] tnum outline-none focus:border-brand"
-                />
+                <div className="w-[116px] shrink-0">
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    value={l.amount || ""}
+                    placeholder="0"
+                    onChange={(e) => setLeg(i, { amount: Number(e.target.value) || 0 })}
+                    className="w-full rounded-xl border border-rule px-2.5 py-2 text-right font-mono text-[14px] tnum outline-none focus:border-brand"
+                  />
+                  <p className="mt-0.5 text-right font-mono text-[10px] text-muted">{legCurrency(l)}</p>
+                </div>
                 {legs.length > 1 && (
                   <button
                     onClick={() => setLegs(legs.filter((_, j) => j !== i))}
@@ -353,10 +364,10 @@ function TransferForm({ onClose }: { onClose: () => void }) {
           </div>
           <div className="mt-2.5 flex justify-between border-t border-rule pt-2 font-mono text-[12.5px]">
             <span className="text-muted">
-              출발 {fmtAmount(Number(amount) || 0, currency)} / 도착 {fmtAmount(legSum, currency)}
+              출발 {fmtAmount(sourceBase, data.settings.base)} / 도착 {fmtAmount(legBase, data.settings.base)}
             </span>
             <span className={Math.abs(diff) < 1e-6 ? "font-bold text-pos" : "font-bold text-stamp"}>
-              {Math.abs(diff) < 1e-6 ? "일치 ✓" : `차이 ${diff}`}
+              {Math.abs(diff) < 0.01 ? "환산 일치 ✓" : `기준통화 차이 ${fmtAmount(diff, data.settings.base)}`}
             </span>
           </div>
         </div>
@@ -368,7 +379,7 @@ function TransferForm({ onClose }: { onClose: () => void }) {
           <Input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="예: ABA → 지갑·금고" />
         </Field>
         <p className="font-mono text-[11.5px] leading-relaxed text-muted">
-          내부 이체는 수입·지출로 기록되지 않습니다. 전체 순자산 변화 = 0.
+          각 도착 금액은 해당 자산 통화로 입력합니다. 거래 시점 환율로 환산해 출발 금액과 대조하며, 당시 환산액을 기록합니다.
         </p>
       </div>
     </Modal>
