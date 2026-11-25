@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { casinoSessionTotals, transactionReversalDeltas } from "./entities";
+import { casinoSessionTotals, computeNetWorth, transactionReversalDeltas } from "./entities";
+import { DEFAULT_SETTINGS } from "./calc";
 
 describe("casino session currency accounting", () => {
   it("converts each Buy-in and Cash-out using its stored transaction FX", () => {
@@ -133,5 +134,42 @@ describe("external payout transfer reversal", () => {
       legs: [{ kind: "cash", id: "wallet", amount: 500, currency: "KHR", fxRate: 4000 }],
       categoryId: "in-invest", tagIds: [], createdAt: 1,
     }, true)).toEqual([{ kind: "cash", id: "wallet", delta: -500 }]);
+  });
+});
+
+
+describe("crypto net-worth row currency", () => {
+  it("keeps the native USD amount separate from the selected base-currency value", () => {
+    const result = computeNetWorth({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        base: "KRW",
+        rates: { ...DEFAULT_SETTINGS.rates, KRW: 1400 },
+      },
+      accounts: [],
+      accountTypes: [],
+      institutions: [],
+      countries: [],
+      cashLocations: [],
+      cryptoWallets: [{ id: "wallet-1", name: "Cold wallet", kind: "hardware", sortOrder: 1 }],
+      cryptoAssets: [{ id: "btc-1", walletId: "wallet-1", symbol: "BTC", quantity: 0.1 }],
+      cryptoPrices: [{
+        id: "BTC", symbol: "BTC", price: 60000, currency: "USD",
+        source: "manual", fetchedAt: 1, isStale: false,
+      }],
+      propAccounts: [],
+      propPayouts: [],
+      casinoSessions: [],
+      casinoBuyIns: [],
+      casinoCashOuts: [],
+    });
+
+    expect(result.rows).toContainEqual(expect.objectContaining({
+      id: "wallet-1",
+      currency: "USD",
+      amount: 6000,
+      base: 8400000,
+    }));
+    expect(result.total).toBe(8400000);
   });
 });
