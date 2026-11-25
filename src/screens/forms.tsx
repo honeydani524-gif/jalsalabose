@@ -486,7 +486,7 @@ function SnapshotForm({ onClose }: { onClose: () => void }) {
                 <NumInput value={wd} onChange={setWd} currency={currency} />
               </Field>
             </div>
-            <Field label="입출금 출처 (선택)" hint="선택하면 계좌 간 이체 1건이 함께 생성됩니다">
+            <Field label="입출금 출처 (선택)" hint="선택하면 입금과 출금이 각각 별도 이체로 기록됩니다">
               <Select value={fromId} onChange={(e) => setFromId(e.target.value)}>
                 <option value="">외부 자금 (별도 이체 없음)</option>
                 {data.accounts
