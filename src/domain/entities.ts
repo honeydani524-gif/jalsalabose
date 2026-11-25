@@ -199,6 +199,8 @@ export type BuyIn = {
   fxRate: number;
   /** Buy-in amount expressed in the fixed session currency at transaction time. */
   sessionAmount?: number;
+  /** Actual chips received, expressed in the fixed session currency. */
+  chipSessionAmount?: number;
   chipAmount: number;
   fee: number;
   date: number;
@@ -266,16 +268,31 @@ export function casinoSessionTotals(
   const buyIn = sessionBuyIns.reduce(
     (sum, b) => sum + (typeof b.sessionAmount === "number"
       ? b.sessionAmount
-      : toSessionCurrency(b.amount, b.fxRate || sessionFxRate, sessionFxRate)),
+      : toSessionCurrency(b.amount + (b.fee || 0), b.fxRate || sessionFxRate, sessionFxRate)),
     0,
   );
   const cashOut = sessionCashOuts.reduce(
     (sum, c) => sum + (typeof c.sessionAmount === "number"
       ? c.sessionAmount
-      : toSessionCurrency(c.totalAmount, c.fxRate || sessionFxRate, sessionFxRate)),
+      : toSessionCurrency(c.totalAmount - (c.fee || 0), c.fxRate || sessionFxRate, sessionFxRate)),
     0,
   );
-  return { currency, buyIn: round(buyIn, 6), cashOut: round(cashOut, 6), open: round(buyIn - cashOut, 6) };
+  const chipIn = sessionBuyIns.reduce(
+    (sum, b) => sum + (typeof b.chipSessionAmount === "number"
+      ? b.chipSessionAmount
+      : toSessionCurrency(b.chipAmount ?? b.amount, b.fxRate || sessionFxRate, sessionFxRate)),
+    0,
+  );
+  const chipOut = sessionCashOuts.reduce(
+    (sum, c) => sum + toSessionCurrency(c.totalAmount, c.fxRate || sessionFxRate, sessionFxRate),
+    0,
+  );
+  return {
+    currency,
+    buyIn: round(buyIn, 6),
+    cashOut: round(cashOut, 6),
+    open: round(chipIn - chipOut, 6),
+  };
 }
 
 /* ── 진행 중 칩 (미정산) ────────────────────────────────── */
