@@ -12,7 +12,6 @@ function CashOutForm({ sessionId, onClose }: { sessionId: string; onClose: () =>
   const { data, addCashOut } = useStore();
   const ses = data.casinoSessions.find((s) => s.id === sessionId);
   const bi = data.casinoBuyIns.filter((b) => b.sessionId === sessionId);
-  const co = data.casinoCashOuts.filter((c) => c.sessionId === sessionId);
   const currency = ses?.currency ?? "USD";
   const sessionTotals = casinoSessionTotals(sessionId, data.casinoBuyIns, data.casinoCashOuts);
   const bought = sessionTotals.open;
