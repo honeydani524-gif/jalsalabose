@@ -1,4 +1,4 @@
-name: Baseline verification
+name: Verify and build Android APK
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verify:
@@ -17,16 +17,86 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
+
+      - name: Sync npm lockfile for Capacitor dependencies
+        if: hashFiles('capacitor.config.ts') != ''
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Commit updated npm lockfile
+        if: hashFiles('capacitor.config.ts') != '' && github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: sync Capacitor dependency lockfile [skip ci]"
+            git push origin "${GITHUB_REF_NAME}"
+          fi
+
       - name: Install dependencies
         run: npm ci
+
       - name: Financial regression tests
         run: npm test
+
       - name: TypeScript check
         run: npx tsc --noEmit
-      - name: Production build
+
+      - name: Production web build
         run: npm run build
+
+      - name: Setup Java
+        if: hashFiles('capacitor.config.ts') != ''
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Setup Android SDK
+        if: hashFiles('capacitor.config.ts') != ''
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        if: hashFiles('capacitor.config.ts') != ''
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Generate Capacitor Android project
+        if: hashFiles('capacitor.config.ts') != ''
+        run: |
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+
+      - name: Commit generated Android project
+        if: hashFiles('capacitor.config.ts') != '' && github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add android
+          if ! git diff --cached --quiet; then
+            git commit -m "build: add generated Capacitor Android project [skip ci]"
+            git push origin "${GITHUB_REF_NAME}"
+          fi
+
+      - name: Build debug APK
+        if: hashFiles('capacitor.config.ts') != ''
+        run: cd android && ./gradlew assembleDebug
+
+      - name: Upload debug APK
+        if: hashFiles('capacitor.config.ts') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: jalsalabose-android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
