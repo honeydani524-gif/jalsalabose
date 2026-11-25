@@ -59,23 +59,23 @@ export default function SettingsScreen() {
     }
   };
 
-  const applyRates = () => {
+  const applyRates = async () => {
     const next = { ...s, rates };
     const before = nw.total;
     const after = computeNetWorth({ ...data, settings: next }).total;
-    Object.entries(rates).forEach(([cur, rate]) => {
-      if (cur === "USD") return;
-      if (s.rates[cur] === rate) return;
-      save("exchangeRates", {
-        id: `rate-${cur}-${Date.now()}`,
+    const effectiveAt = Date.now();
+    for (const [cur, rate] of Object.entries(rates)) {
+      if (cur === "USD" || s.rates[cur] === rate) continue;
+      await save("exchangeRates", {
+        id: `rate-${cur}-${effectiveAt}`,
         base: cur,
         rate,
-        effectiveAt: Date.now(),
+        effectiveAt,
         source: "manual",
         memo: "설정에서 변경",
       });
-    });
-    setSettings({ rates });
+    }
+    await setSettings({ rates });
     setMsg(
       `환율 적용 완료 · 총자산 ${fmtAmount(before, s.base)} → ${fmtAmount(after, s.base)} (${fmtAmount(
         after - before,
