@@ -20,7 +20,6 @@ import {
   allRows,
   putRow,
   putRows,
-  putBatch,
   writeBatch,
   replaceAll,
   STORE_LIST,
@@ -1236,17 +1235,20 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   );
 
   const resetAll = useCallback(async () => {
-    await clearAll();
     const s = seed();
-    await putRows("countries", s.countries);
-    await putRows("institutions", s.institutions);
-    await putRows("accountTypes", s.accountTypes);
-    await putRows("categories", s.categories);
-    await putRows("exchangeRates", s.exchangeRates);
-    await putRow("kv", s.settings as unknown as { id: string });
     const fresh = { ...(s as unknown as Data), ...emptyTables() } as Data;
+    const rowsByStore = Object.fromEntries(
+      STORE_LIST.map((store) => [
+        store,
+        store === "kv"
+          ? [{ id: "settings", ...fresh.settings }]
+          : ((fresh as unknown as Record<string, { id: string }[]>)[store] ?? []),
+      ]),
+    ) as Record<StoreName, { id: string }[]>;
+    await replaceAll(rowsByStore);
     ref.current = fresh;
     setData(fresh);
+    setError(null);
   }, []);
 
   /* ── 샘플 데이터 (사용자가 직접 생성 · 삭제 가능) ── */
@@ -1369,13 +1371,19 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       settings: { ...d.settings, sampleLoaded: true },
       nwHistory: [],
     };
-    await clearStore("nwHistory"); // 기존 이력과 섞이지 않도록 초기화
     const withHist = recordHistory({ ...next, nwHistory: [] });
-    await commit(withHist);
-    STORE_LIST.forEach((s) => {
-      const rows = (withHist as unknown as Record<string, { id: string }[]>)[s];
-      if (Array.isArray(rows) && rows.length) putRows(s, rows).catch(() => undefined);
-    });
+    const rowsByStore = Object.fromEntries(
+      STORE_LIST.map((store) => [
+        store,
+        store === "kv"
+          ? [{ id: "settings", ...withHist.settings }]
+          : ((withHist as unknown as Record<string, { id: string }[]>)[store] ?? []),
+      ]),
+    ) as Record<StoreName, { id: string }[]>;
+    await replaceAll(rowsByStore);
+    ref.current = withHist;
+    setData(withHist);
+    setError(null);
   }, [commit, recordHistory]);
 
   const value = useMemo<StoreValue | null>(() => {
