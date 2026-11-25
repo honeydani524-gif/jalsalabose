@@ -139,6 +139,10 @@ export type PropPayout = {
   receivedAt: number;
   to: { kind: "account" | "cash"; id: string };
   fee: number;
+  /** Links the payout record to its generated transaction for safe deletion. */
+  transactionId?: string;
+  /** Exact amount removed from payoutRequested, so deletion can restore it. */
+  requestedReduction?: number;
   memo?: string;
 };
 export type Wallet = {
@@ -254,6 +258,39 @@ export function walletValueIn(
 
 export function cryptoTotalBase(assets: Asset[], prices: Price[], settings: Settings): number {
   return round(assets.reduce((s, a) => s + toBase(a.quantity * assetPrice(a, prices), "USD", settings), 0), 6);
+}
+
+
+export type BalanceDelta = { kind: "account" | "cash"; id: string; delta: number };
+
+/** Return the native-currency balance changes needed to undo a ledger transaction. */
+export function transactionReversalDeltas(tx: Tx, omitTransferSource = false): BalanceDelta[] {
+  if (tx.type === "income" || tx.type === "expense") {
+    if (!tx.accountId) throw new Error("거래에 연결된 계좌가 없어 잔액을 복구할 수 없습니다.");
+    return [{ kind: "account", id: tx.accountId, delta: tx.type === "income" ? -tx.amount : tx.amount }];
+  }
+  if (tx.type === "transfer") {
+    if (!tx.from && !omitTransferSource)
+      throw new Error("이체 출발 자산 정보가 없어 잔액을 복구할 수 없습니다.");
+    const deltas: BalanceDelta[] = [];
+    if (tx.from && !omitTransferSource)
+      deltas.push({ kind: tx.from.kind, id: tx.from.id, delta: tx.amount });
+    (tx.legs ?? []).forEach((leg) => deltas.push({
+      kind: leg.kind,
+      id: leg.id,
+      delta: -leg.amount,
+    }));
+    return deltas;
+  }
+  if (tx.type === "adjust") {
+    if (!tx.from) throw new Error("잔액 조정 자산 정보가 없습니다.");
+    return [{ kind: tx.from.kind, id: tx.from.id, delta: -tx.amount }];
+  }
+  if (tx.type === "casino") {
+    if (!tx.from) throw new Error("카지노 거래 출발 자산 정보가 없습니다.");
+    return [{ kind: tx.from.kind, id: tx.from.id, delta: tx.amount }];
+  }
+  return [];
 }
 
 /* ── 세션 통화 기준 금액 (과거 데이터 호환) ─────────────── */
