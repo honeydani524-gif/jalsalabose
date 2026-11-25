@@ -55,7 +55,8 @@ export function rateAt(
     .sort((a, b) => b.effectiveAt - a.effectiveAt)[0];
   const fallback = fallbackRates[currency];
   const value = historical?.rate ?? fallback;
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 1;
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  throw new Error(`통화 ${currency}의 ${new Date(timestamp).toLocaleDateString("ko-KR")} 기준 환율이 없습니다. 환율을 먼저 등록하세요.`);
 }
 
 
