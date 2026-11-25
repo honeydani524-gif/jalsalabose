@@ -784,7 +784,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }) => {
       const d = ref.current;
       if (!d) throw new Error("데이터가 준비되지 않았습니다.");
-      if (input.amount <= 0 || input.fee < 0) throw new Error("금액 또는 수수료를 확인하세요.");
+      if (input.amount <= 0 || input.chipAmount <= 0 || input.fee < 0) throw new Error("금액, 실제 칩 교환액 또는 수수료를 확인하세요.");
 
       let sessionId = input.sessionId;
       const pers: Persist = [];
