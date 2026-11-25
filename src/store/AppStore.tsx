@@ -706,10 +706,12 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       pers.push(["accounts", accRow]);
 
       // Reverse any earlier flow rows for this same snapshot before replacing them.
+      // Persist every reversed source/destination row, even if the user changes or
+      // removes the selected source while editing the snapshot.
       oldSnapshotTxs.forEach((tx) => {
-        if (tx.from) next = bumpRel(next, tx.from.kind, tx.from.id, tx.amount, []);
+        if (tx.from) next = bumpRel(next, tx.from.kind, tx.from.id, tx.amount, pers);
         (tx.legs ?? []).forEach((leg) => {
-          next = bumpRel(next, leg.kind, leg.id, -leg.amount, []);
+          next = bumpRel(next, leg.kind, leg.id, -leg.amount, pers);
         });
       });
       // The snapshot's ending balance is authoritative, including when an older
