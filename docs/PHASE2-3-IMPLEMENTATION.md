@@ -84,3 +84,4 @@ The workflow must pass on the final branch head before this phase is considered 
 - Snapshot edits now persist balance reversals for every previously linked source/destination asset, including when the source is changed or removed.
 - Backup import rejects missing store arrays or a missing/duplicate settings row before replacing the database.
 - Exchange-rate history rows and the current settings are committed in one multi-store IndexedDB transaction.
+- Package metadata, the settings screen, and Android Gradle metadata now report the same app version (0.1.0).
