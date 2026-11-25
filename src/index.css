@@ -1,0 +1,122 @@
+@import "tailwindcss";
+
+@theme {
+  --color-paper: #f6f8fa;
+  --color-card: #ffffff;
+  --color-ink: #191f28;
+  --color-muted: #8b95a1;
+  --color-rule: #e5e8eb;
+  --color-brand: #3182f6;
+  --color-brand-deep: #1b64da;
+  --color-pos: #16a34a;
+  --color-warn: #f59e0b;
+  --color-stamp: #e5484d;
+
+  --font-serif: "Noto Serif KR", Georgia, serif;
+  --font-sans: "Noto Sans KR", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 5.5rem;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background-color: #f6f8fa;
+  color: #191f28;
+  font-family: "Noto Sans KR", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  background-image:
+    linear-gradient(to right, rgba(49, 130, 246, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(49, 130, 246, 0.045) 1px, transparent 1px);
+  background-size: 48px 48px;
+  background-attachment: fixed;
+}
+
+::selection {
+  background: #3182f6;
+  color: #fff;
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 문서 등장: 인쇄물이 자리 잡는 느낌 */
+.reveal {
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 180ms ease-out, transform 180ms ease-out;
+}
+.reveal.is-in {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* 사양 표: 괘선이 주인공 */
+.spec {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.spec thead th {
+  background: #f6f8fa;
+  color: #8b95a1;
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: left;
+  padding: 9px 12px;
+  border-top: 1px solid #191f28;
+  border-bottom: 1px solid #e5e8eb;
+  white-space: nowrap;
+}
+.spec tbody td {
+  padding: 9px 12px;
+  border-bottom: 1px solid #e5e8eb;
+  vertical-align: top;
+}
+.spec tbody tr:hover td {
+  background: #f9fbfd;
+}
+.spec .m {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12.5px;
+  color: #191f28;
+  white-space: nowrap;
+}
+.spec .t {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11.5px;
+  color: #8b95a1;
+  white-space: nowrap;
+}
+.spec th.r,
+.spec td.r {
+  text-align: right;
+}
+
+.stamp {
+  transform: rotate(-8deg);
+}
+
+/* 스크롤 진행바 */
+#progress {
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+}
