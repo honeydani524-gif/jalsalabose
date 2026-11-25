@@ -20,6 +20,7 @@ Use this checklist against the latest APK artifact produced by the GitHub Action
 - [ ] Verify cash locations, crypto wallets, prop accounts, and casinos with linked history cannot be deleted
 - [ ] Confirm snapshot-generated transactions cannot be deleted independently
 - [ ] Change the selected base currency and verify historical income/expense summaries remain correct using transaction-time FX
+- [ ] Rapidly submit two balance-changing actions; verify the second is rejected while a save is active rather than overwriting the first balance
 - [ ] Restart the app and verify persistence
 - [ ] Record a cross-currency transfer and verify both sides and historical FX details
 - [ ] Create an investment snapshot with both deposit and withdrawal flows; edit it and verify every source/destination balance
