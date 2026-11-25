@@ -16,6 +16,8 @@ Use this checklist against the latest APK artifact produced by the GitHub Action
 - [ ] Launch the app and confirm the dashboard loads without errors
 - [ ] Create and delete income/expense transactions; verify the linked account balance is reversed exactly
 - [ ] Create and delete a multi-destination transfer; verify source and every destination balance are restored
+- [ ] Verify an account referenced only as a transfer destination cannot be deleted
+- [ ] Verify cash locations, crypto wallets, prop accounts, and casinos with linked history cannot be deleted
 - [ ] Confirm snapshot-generated transactions cannot be deleted independently
 - [ ] Change the selected base currency and verify historical income/expense summaries remain correct using transaction-time FX
 - [ ] Restart the app and verify persistence
