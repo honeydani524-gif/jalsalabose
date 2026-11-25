@@ -775,7 +775,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      await commit(recordHistory(next), pers, oldSnapshotTxs.map((tx) => ["transactions", tx.id]));
+      await commit(recordHistory(next), pers, oldSnapshotTxs.map((tx): [StoreName, string] => ["transactions", tx.id]));
     },
     [commit, recordHistory],
   );
@@ -1107,20 +1107,20 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const importJSON = useCallback(
     async (text: string) => {
-      let parsed: Record<string, unknown>;
+      let parsedValue: unknown;
       try {
-        const value: unknown = JSON.parse(text);
-        if (!value || typeof value !== "object" || Array.isArray(value))
-          throw new Error("백업의 최상위 구조가 올바르지 않습니다.");
-        parsed = value as Record<string, unknown>;
-      } catch (e) {
-        if (e instanceof Error && e.message !== "Unexpected end of JSON input" &&
-          e.message !== "백업의 최상위 구조가 올바르지 않습니다.") throw e;
+        parsedValue = JSON.parse(text);
+      } catch {
         throw new Error("올바른 JSON 파일이 아닙니다.");
       }
+      if (!parsedValue || typeof parsedValue !== "object" || Array.isArray(parsedValue))
+        throw new Error("백업의 최상위 구조가 올바르지 않습니다.");
+      const parsed = parsedValue as Record<string, unknown>;
 
       const meta = parsed.meta as { app?: string; schemaVersion?: number } | undefined;
       if (!meta || meta.app !== "JalSalAboSe") throw new Error("잘살아보세 백업 파일이 아닙니다.");
+      if (meta.schemaVersion !== undefined && typeof meta.schemaVersion !== "number")
+        throw new Error("백업 데이터 버전 정보가 올바르지 않습니다.");
       if (typeof meta.schemaVersion === "number" && meta.schemaVersion > 1)
         throw new Error("이 앱보다 높은 데이터 버전입니다. 앱을 먼저 업그레이드하세요.");
       if (typeof meta.schemaVersion === "number" && meta.schemaVersion < 1)
@@ -1205,6 +1205,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (normalized.kv.length > 1)
         throw new Error("설정 데이터가 여러 개 포함되어 있습니다.");
       const settingsRow = normalized.kv[0] as (Settings & { id: string }) | undefined;
+      if (settingsRow && settingsRow.id !== "settings")
+        throw new Error("설정 데이터 ID가 올바르지 않습니다.");
       const rawRates = settingsRow?.rates;
       if (rawRates !== undefined && !isRecord(rawRates))
         throw new Error("설정의 환율 정보가 올바르지 않습니다.");
