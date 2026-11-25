@@ -38,6 +38,7 @@ import { convertAtRates, netPayoutAfterUsdFee, rateAt as historicalRateAt, toSes
 import {
   computeNetWorth,
   casinoSessionTotals,
+  transactionReversalDeltas,
   type Account,
   type Asset,
   type BuyIn,
@@ -115,6 +116,7 @@ export type StoreValue = {
   nw: NwResult;
   save: (store: StoreName, row: { id: string } & Record<string, unknown>) => Promise<void>;
   remove: (store: StoreName, id: string) => Promise<void>;
+  removeTransaction: (id: string) => Promise<void>;
   setSettings: (patch: Partial<Settings>) => Promise<void>;
   applyTx: (input: TxInput) => Promise<void>;
   setBalance: (kind: "account" | "cash", id: string, next: number, reason: string) => Promise<void>;
@@ -427,6 +429,63 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const list = (d as unknown as Record<StoreName, { id: string }[]>)[store] ?? [];
       const next = { ...d, [store]: list.filter((r) => r.id !== id) } as Data;
       await commit(recordHistory(next), [], [[store, id]]);
+    },
+    [commit, recordHistory],
+  );
+
+  const removeTransaction = useCallback(
+    async (id: string) => {
+      const d = ref.current;
+      if (!d) return;
+      const tx = d.transactions.find((row) => row.id === id);
+      if (!tx) return;
+
+      const legacySnapshot = tx.type === "transfer" &&
+        /^\\d{4}-\\d{2}-\\d{2} 투자 (입금|출금)$/.test(tx.memo ?? "");
+      if (tx.snapshotId || legacySnapshot)
+        throw new Error("투자 스냅샷에서 자동 생성된 이체입니다. 거래 내역에서 따로 삭제하지 말고 해당 스냅샷을 수정하세요.");
+
+      const payout = d.propPayouts.find((row) => row.transactionId === tx.id);
+      const legacyPayout = !payout && tx.categoryId === "in-invest" &&
+        !!tx.counterparty && (tx.memo ?? "").includes(" 지급");
+      if (legacyPayout)
+        throw new Error("이전 버전의 프랍 지급 기록은 거래와 지급 내역이 연결되어 있지 않아 개별 삭제를 막았습니다. 데이터가 어긋나지 않도록 유지해 주세요.");
+
+      const deltas = transactionReversalDeltas(tx, Boolean(payout && tx.type === "transfer"));
+      let next: Data = {
+        ...d,
+        transactions: d.transactions.filter((row) => row.id !== tx.id),
+      };
+      const persist: Persist = [];
+      for (const item of deltas) {
+        const exists = item.kind === "account"
+          ? next.accounts.some((row) => row.id === item.id)
+          : next.cashLocations.some((row) => row.id === item.id);
+        if (!exists)
+          throw new Error("거래에 연결된 자산을 찾을 수 없어 안전하게 잔액을 복구할 수 없습니다.");
+        next = bumpRel(next, item.kind, item.id, item.delta, persist);
+      }
+
+      const deletes: [StoreName, string][] = [["transactions", tx.id]];
+      if (payout) {
+        const propAccount = next.propAccounts.find((row) => row.id === payout.propAccountId);
+        if (!propAccount)
+          throw new Error("프랍 지급에 연결된 계정을 찾을 수 없어 안전하게 삭제할 수 없습니다.");
+        const requestedReduction = payout.requestedReduction ?? payout.amount;
+        const updatedProp = {
+          ...propAccount,
+          payoutRequested: round(propAccount.payoutRequested + requestedReduction, 6),
+        };
+        next = {
+          ...next,
+          propAccounts: upsert(next.propAccounts, updatedProp),
+          propPayouts: next.propPayouts.filter((row) => row.id !== payout.id),
+        };
+        persist.push(["propAccounts", updatedProp]);
+        deletes.push(["propPayouts", payout.id]);
+      }
+
+      await commit(recordHistory(next), persist, deletes);
     },
     [commit, recordHistory],
   );
@@ -1041,6 +1100,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const baseAmt = toBaseAtTx(d, netPayout, input.currency, input.receivedAt);
       const credit = round(convertAtRates(netPayout, payoutFxRate, targetFxRate), 6);
 
+      const transactionId = uid();
+      const requestedReduction = Math.min(input.amount, pa.payoutRequested);
       const payout: PropPayout = {
         id: uid(),
         propAccountId: input.propAccountId,
@@ -1050,11 +1111,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         receivedAt: input.receivedAt,
         to: input.to,
         fee: round(input.fee, 6),
+        transactionId,
+        requestedReduction: round(requestedReduction, 6),
         memo: input.memo,
       };
 
       const tx: Tx = {
-        id: uid(),
+        id: transactionId,
         type: "income",
         amount: credit,
         currency: target.currency,
@@ -1099,7 +1162,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       );
       const paList = next.propAccounts.map((p) =>
         p.id === input.propAccountId
-          ? { ...p, payoutRequested: Math.max(0, round(p.payoutRequested - input.amount, 6)) }
+          ? { ...p, payoutRequested: Math.max(0, round(p.payoutRequested - requestedReduction, 6)) }
           : p,
       );
       next = { ...next, accounts, cashLocations, propAccounts: paList };
@@ -1431,6 +1494,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       nw,
       save,
       remove,
+      removeTransaction,
       setSettings,
       applyTx,
       setBalance,
@@ -1449,6 +1513,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     error,
     save,
     remove,
+    removeTransaction,
     setSettings,
     applyTx,
     setBalance,
