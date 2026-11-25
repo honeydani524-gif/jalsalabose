@@ -426,6 +426,24 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         throw new Error("거래 삭제는 잔액 복구가 포함된 removeTransaction을 사용해야 합니다.");
       const d = ref.current;
       if (!d) return;
+      if (store === "accounts" || store === "cashLocations") {
+        const kind = store === "accounts" ? "account" : "cash";
+        const referenced =
+          d.transactions.some((tx) =>
+            (tx.accountId === id && kind === "account") ||
+            (tx.from?.kind === kind && tx.from.id === id) ||
+            (tx.legs ?? []).some((leg) => leg.kind === kind && leg.id === id)
+          ) ||
+          d.invSnapshots.some((snapshot) => kind === "account" && snapshot.accountId === id) ||
+          d.propPayouts.some((payout) => payout.to.kind === kind && payout.to.id === id) ||
+          d.casinoBuyIns.some((buyIn) => buyIn.from.kind === kind && buyIn.from.id === id) ||
+          d.casinoCashOuts.some((cashOut) =>
+            cashOut.legs.some((leg) => leg.kind === kind && leg.id === id)
+          );
+        if (referenced) {
+          throw new Error("거래·투자·카지노·프랍 기록에서 사용 중인 자산은 삭제할 수 없습니다. 보관 처리해 주세요.");
+        }
+      }
       const list = (d as unknown as Record<StoreName, { id: string }[]>)[store] ?? [];
       const next = { ...d, [store]: list.filter((r) => r.id !== id) } as Data;
       await commit(recordHistory(next), [], [[store, id]]);
