@@ -557,6 +557,10 @@ export function BuyInForm({
         : data.cryptoWallets.find((w) => w.id === from.id)
     : undefined;
   const currency = from?.kind === "crypto" ? "USD" : (src as { currency?: string } | undefined)?.currency ?? "USD";
+  const activeSession = sessionId
+    ? data.casinoSessions.find((s) => s.id === sessionId)
+    : data.casinoSessions.find((s) => s.casinoId === cid && s.status === "ongoing");
+  const sessionCurrency = activeSession?.currency ?? currency;
 
   const submit = async () => {
     setErr(null);
@@ -650,6 +654,9 @@ export function BuyInForm({
         <Field label="금액" required>
           <NumInput value={amount} onChange={setAmount} currency={currency} autoFocus />
         </Field>
+        <p className="font-mono text-[11.5px] leading-relaxed text-muted">
+          세션 기준 통화: {sessionCurrency} · 입력 통화 {currency}는 거래 시점 환율로 환산해 기록합니다.
+        </p>
         <div className="grid grid-cols-2 gap-3">
           <Field label="실제 칩 교환액">
             <NumInput value={chip} onChange={setChip} currency={currency} />
