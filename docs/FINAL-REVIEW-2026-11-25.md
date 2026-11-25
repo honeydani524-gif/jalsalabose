@@ -4,44 +4,54 @@
 - Working branch: `fix/phase-2-financial-corrections`
 - Pull request: [#1](https://github.com/honeydani524-gif/jalsalabose/pull/1)
 - Base branch: `audit/phase-1-baseline`
-- `main` was not modified or merged.
+- `main` remains unchanged at the baseline commit.
+- APK creation is intentionally manual and was not part of the latest verification runs.
 
 ## Findings corrected
 
 | Area | Finding | Correction |
 |---|---|---|
-| Casino crypto Buy-in | USD-denominated value was subtracted as if it were BTC/ETH/SOL token quantity. | Restrict the current USD 1:1 debit path to USDT until historical token-price snapshots are implemented. |
-| Prop payouts | USD-denominated fees were stored but not deducted from the credited amount; payout and destination FX used current rather than receipt-time rates. | Convert the USD fee at the payout-date rate, credit the net payout, and persist the historical payout/destination FX snapshots. |
-| Investment snapshot editing | Reversing an old snapshot flow could update another source asset in memory without persisting its corrected balance. | Persist every reversed source/destination balance row in the same batch transaction. |
-| Backup restore | Missing store arrays could be treated as empty arrays and wipe existing records during restore. | Require all store arrays, the supported backup/schema versions, and exactly one settings row before atomic replacement. |
-| Exchange-rate settings | Rate-history rows and settings were saved separately, allowing a partial update if a later write failed. | Save all changed rate-history rows and settings in one multi-store IndexedDB transaction. |
-| Backup export | The object URL was revoked immediately after clicking download; mobile browsers may also support file sharing more reliably. | Prefer the native file-share sheet where supported and defer object-URL cleanup for the download fallback. |
-| CI permissions | The verification job had repository write permission and auto-committed generated files. | Use read-only repository permissions and build/sync generated Android files only in the runner. |
-| Version metadata | Package, settings screen, and Android version labels differed. | Align all three to version `0.1.0`. |
-| Documentation | The implementation notes still claimed Android packaging had not been added. | Reconcile the implementation notes and record remaining release checks. |
+| Casino crypto Buy-in | USD-denominated value could be debited as if it were BTC/ETH/SOL token quantity. | Restrict the current USD 1:1 debit path to USDT until historical token-price snapshots are implemented. |
+| Casino session currency | A later Buy-in entered with an earlier date could be mistaken for the first Buy-in by date-sorted totals. | Use the persisted session currency and FX rate for totals, cash-out validation, and open-chip calculations; add a backdated-entry regression test. |
+| Prop payouts | USD-denominated fees were not deducted from credited payouts and FX could use current rather than receipt-time rates. | Convert the fee at the payout-date rate, credit the net amount, persist historical FX, and link payout rows to their generated transactions. |
+| Investment snapshot editing | Reversing old snapshot flows could update source balances in memory without persisting them. | Persist every reversed source/destination balance in the same transaction. |
+| Transaction deletion | Deleting a ledger row removed only the transaction record, leaving cached asset balances unchanged. | Reverse the transaction's native-currency balance effects and delete the row atomically; protect snapshot-generated rows and safely unlink new prop payouts. |
+| Backup restore | Missing store arrays or malformed values could risk destructive replacement. | Validate required stores, IDs, financial fields, settings, and casino legs before one atomic replacement. |
+| IndexedDB writes | A synchronous object-store write exception could leave earlier queued writes eligible to commit. | Abort the whole transaction on synchronous errors in batch and replace operations. |
+| Exchange-rate settings | Rate-history rows and settings could be persisted separately. | Save settings and all new rate-history rows in one multi-store transaction. |
+| Backup export | Immediate object-URL cleanup and mobile sharing could cause unreliable exports. | Prefer native file sharing when available and defer URL cleanup for download fallback. |
+| Android instrumentation test | The sample test expected the wrong application ID. | Align the assertion with `com.jalsalabose.app`. |
+| CI permissions | The workflow previously had write access and generated-file auto-commit behavior. | Keep repository permissions read-only and do not auto-commit generated files. |
+| APK workflow | Routine code review previously generated a debug APK. | Keep push/PR checks to tests, type checking, and web build; gate APK packaging behind manual `workflow_dispatch` input. |
+| GitHub PR target | PR #1 targeted `main` instead of the intended audit baseline. | Retarget PR #1 to `audit/phase-1-baseline`; `main` was not modified. |
+| Documentation and metadata | README and package-lock metadata were stale. | Align package-lock root version and refresh README/build/QA instructions. |
 
-## Verification evidence
+## Latest automated verification
 
-- A GitHub Actions run on the branch completed successfully at commit `c67531c8171ec1bf4929ee1d37b02d4cd819712c`:
-  - financial regression tests
-  - TypeScript check
-  - Vite production build
-  - Capacitor Android sync
-  - Android debug APK build and artifact upload
-- That successful run predates the final follow-up changes in this report (atomic rate settings, stricter backup validation, version alignment, and export-share fallback). Those final edits still require a fresh CI run before release.
-- Earlier CI evidence: [workflow run 45558976609](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45558976609).
+The latest code verification completed successfully at commit `7bc3dac31b6b2198077cdbedde27f0a0e99c5e3c`.
 
-## Remaining release checks
+- GitHub Actions push run: [45593912117](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45593912117)
+- GitHub Actions pull request run: [45593922888](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45593922888)
+- `npm ci`: passed
+- Financial regression tests: passed
+- TypeScript check: passed
+- Vite production build: passed
+- Android APK job: skipped by design
 
-1. Run CI again against the latest branch head and verify a fresh APK artifact is produced.
-2. Install the latest APK on a physical Android phone and test first launch, app restart, orientation/process recreation, and update installation.
-3. Test JSON export through Android's share sheet/download fallback, then import the file and verify balances and transaction counts.
-4. Perform a failure-injection test for IndexedDB restore to confirm a rejected transaction leaves the original database unchanged.
-5. Configure a persistent release keystore in GitHub Actions secrets before publishing upgrades that must install over an existing app and preserve local IndexedDB data.
+This verification does not certify Android installation or physical-device behavior.
 
-## Important operating notes
+## Remaining checks before release
 
-- App data remains local to each device in WebView IndexedDB. There is no account, server, or cloud sync.
+1. Perform physical Android testing: first launch, persistence after restart, orientation/process recreation, and update installation.
+2. Test JSON export/import on Android and verify balances, transactions, settings, and historical FX.
+3. Perform failure-injection testing for IndexedDB restore and confirm that the old database remains intact after an aborted transaction.
+4. Configure a persistent release keystore in GitHub Actions secrets before distributing upgrades that must install over an existing app.
+5. Manually trigger the APK workflow only when the user is ready to create an APK.
+
+## Operating notes
+
+- Data remains local to each device in WebView IndexedDB. There is no account, server, or cloud sync.
 - Android automatic backup is disabled. Users must export an in-app JSON backup before reinstalling or changing phones.
-- Casino crypto Buy-in currently supports USDT only. BTC, ETH, and SOL must not be debited as if USD values were token quantities.
-- The current package remains a debug-build workflow; physical device testing and release signing are not yet complete.
+- Casino crypto Buy-in currently supports USDT only.
+- The repository is public and has no standard LICENSE file; source visibility and reuse rights should be considered separately.
+- PR #1 remains open and draft. Do not merge into `main` without explicit approval.
