@@ -31,9 +31,9 @@
 
 ## Latest automated verification
 
-The latest code, package metadata, CI configuration, linked-asset deletion safeguards, crypto valuation correction, net prop payout reporting, and overlapping-commit guard verification completed successfully at commit `e56a009516c565596d0feea931786bb4e53a15fb`.
+The latest code, including whole-database replacement locking, missing-FX rejection, supported-currency validation, backup metadata count correction, and finite input guards, passed verification at commit `b335994fc4a6d2336171dd758a00a1077fbb3326`.
 
-- GitHub Actions verification run: [45610562532](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45610562532)
+- GitHub Actions verification run: [45615459998](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45615459998)
 - `npm ci`: passed
 - Financial regression tests: passed
 - TypeScript check: passed
@@ -74,3 +74,15 @@ The follow-up review also corrected the crypto wallet detail amount so its USD-n
 
 
 A commit-level overlap guard was added so two rapid state mutations cannot both persist balance values derived from the same stale in-memory snapshot. A conflicting second commit is rejected with a retry message instead of silently overwriting the first result.
+
+
+## Third-pass financial and persistence review
+
+- JSON export now reports the settings store count as one (the settings row is synthesized from `Data.settings`, not stored as `Data.kv`).
+- Restore rejects unsupported currency codes in financial rows and settings instead of accepting data that the UI cannot value correctly.
+- Partial settings-rate updates merge with existing rates; unsupported currencies, non-positive/non-finite rates, and a USD rate other than 1 are rejected.
+- Historical FX lookup now throws when neither a transaction-date rate nor a valid configured fallback exists. It no longer silently assumes an unknown currency is equal to USD.
+- Whole-database restore, reset, and sample-data replacement share the same in-process write lock as ordinary commits. The in-memory state is published only after the atomic IndexedDB replacement succeeds.
+- Financial entry points now reject non-finite amounts/dates for transactions, balance edits, investment snapshots, casino Buy-ins/Cash-outs, and prop payouts before writing records.
+
+Latest automated run [45615459998](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45615459998) passed financial regression tests, TypeScript, and production web build. Android APK packaging was skipped by design. These checks do not replace Android device testing or IndexedDB failure-injection tests.
