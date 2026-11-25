@@ -9,7 +9,7 @@ type Range = "month" | "last" | "quarter" | "all";
 type Kind = "all" | "income" | "expense" | "transfer";
 
 export default function TxScreen() {
-  const { data, remove } = useStore();
+  const { data, removeTransaction } = useStore();
   const quick = useQuick();
   const [range, setRange] = useState<Range>("month");
   const [kind, setKind] = useState<Kind>("all");
@@ -17,6 +17,7 @@ export default function TxScreen() {
   const [tag, setTag] = useState("");
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<Tx | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const list = useMemo(() => {
     const now = new Date();
@@ -215,8 +216,13 @@ export default function TxScreen() {
                 variant="danger"
                 full
                 onClick={async () => {
-                  await remove("transactions", open.id);
-                  setOpen(null);
+                  try {
+                    await removeTransaction(open.id);
+                    setOpen(null);
+                    setActionError(null);
+                  } catch (e) {
+                    setActionError((e as Error).message);
+                  }
                 }}
               >
                 삭제
@@ -228,6 +234,7 @@ export default function TxScreen() {
           }
         >
           <div className="space-y-3">
+            {actionError && <p className="rounded-xl bg-[#fdeceb] px-3 py-2.5 text-[13px] text-stamp">{actionError}</p>}
             <div className="rounded-2xl bg-[#f6f8fa] px-4 py-4 text-center">
               <p className="font-mono text-[11.5px] uppercase tracking-wider text-muted">{nameOf(open)}</p>
               <p className="mt-1 font-serif text-[30px] font-black text-ink tnum">
