@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useStore } from "../store/AppStore";
 import { BuyInForm } from "./forms";
 import { Badge, Btn, Card, Empty, Field, Icon, Input, Modal, Money, Row, Segmented, Select, Textarea } from "../ui/kit";
-import { fmtAmount, fmtDate, fmtDateTime, round, toBase } from "../domain/calc";
+import { fmtAmount, fmtDate, fmtDateTime, round } from "../domain/calc";
 import { rateAt as historicalRateAt, toSessionCurrency } from "../domain/finance";
 import { uid } from "../data/db";
 import { casinoSessionTotals, type RelKind } from "../domain/entities";
