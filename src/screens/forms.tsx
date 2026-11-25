@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useStore } from "../store/AppStore";
 import { dayKey, fmtAmount, round, toBase } from "../domain/calc";
+import { rateAt as historicalRateAt } from "../domain/finance";
 import { Badge, Btn, Field, Input, Modal, NumInput, Segmented, Select, Textarea } from "../ui/kit";
 import type { QuickAction } from "../ui/quick";
 
@@ -235,13 +236,15 @@ function TransferForm({ onClose }: { onClose: () => void }) {
       : data.cashLocations.find((c) => c.id === from.id)
     : undefined;
   const currency = fromRow?.currency ?? "USD";
+  const txTimestamp = toTs(date);
+  const rateAt = (cur: string) => historicalRateAt(cur, txTimestamp, data.exchangeRates, data.settings.rates);
   const legCurrency = (leg: (typeof legs)[number]) =>
     leg.kind === "account"
       ? data.accounts.find((a) => a.id === leg.id)?.currency ?? "USD"
       : data.cashLocations.find((a) => a.id === leg.id)?.currency ?? "USD";
-  const sourceBase = toBase(Number(amount) || 0, currency, data.settings);
+  const sourceBase = (Number(amount) || 0) / rateAt(currency);
   const legBase = round(
-    legs.reduce((sum, leg) => sum + toBase(Number(leg.amount) || 0, legCurrency(leg), data.settings), 0),
+    legs.reduce((sum, leg) => sum + (Number(leg.amount) || 0) / rateAt(legCurrency(leg)), 0),
     6,
   );
   const diff = round(sourceBase - legBase, 6);
@@ -255,7 +258,7 @@ function TransferForm({ onClose }: { onClose: () => void }) {
       if (!from?.id) throw new Error("출발 자산을 선택하세요.");
       if (!amount || amount <= 0) throw new Error("금액을 입력하세요.");
       if (legs.some((l) => !l.id)) throw new Error("도착 자산을 모두 선택하세요.");
-      if (Math.abs(diff) > 0.01) throw new Error(`환산 후 도착 합계가 출발 금액과 다릅니다. (기준 통화 차이 ${fmtAmount(diff, data.settings.base)})`);
+      if (Math.abs(diff) > 0.01) throw new Error(`환산 후 도착 합계가 출발 금액과 다릅니다. (기준 통화 차이 ${fmtAmount(diff, "USD")})`);
       await applyTx({
         type: "transfer",
         amount,
@@ -364,7 +367,7 @@ function TransferForm({ onClose }: { onClose: () => void }) {
           </div>
           <div className="mt-2.5 flex justify-between border-t border-rule pt-2 font-mono text-[12.5px]">
             <span className="text-muted">
-              출발 {fmtAmount(sourceBase, data.settings.base)} / 도착 {fmtAmount(legBase, data.settings.base)}
+              출발 {fmtAmount(sourceBase, "USD")} / 도착 {fmtAmount(legBase, "USD")}
             </span>
             <span className={Math.abs(diff) < 1e-6 ? "font-bold text-pos" : "font-bold text-stamp"}>
               {Math.abs(diff) < 0.01 ? "환산 일치 ✓" : `기준통화 차이 ${fmtAmount(diff, data.settings.base)}`}
