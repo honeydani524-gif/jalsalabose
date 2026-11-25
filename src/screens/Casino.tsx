@@ -243,12 +243,12 @@ function SessionDetail({ id, onClose }: { id: string; onClose: () => void }) {
           <p className="mb-1.5 font-mono text-[11.5px] uppercase tracking-wider text-muted">거래 흐름</p>
           {[...bi.map((b) => ({
               k: "in" as const, d: b.date,
-              amt: b.sessionAmount ?? toSessionCurrency(b.amount, b.fxRate || sessionFxRate, sessionFxRate),
+              amt: b.sessionAmount ?? toSessionCurrency(b.amount + (b.fee || 0), b.fxRate || sessionFxRate, sessionFxRate),
               from: relName(b.from.kind, b.from.id), memo: b.memo,
             })),
             ...co.map((x) => ({
               k: "out" as const, d: x.date,
-              amt: x.sessionAmount ?? toSessionCurrency(x.totalAmount, x.fxRate || sessionFxRate, sessionFxRate),
+              amt: x.sessionAmount ?? toSessionCurrency(x.totalAmount - (x.fee || 0), x.fxRate || sessionFxRate, sessionFxRate),
               from: x.legs.map((l) => relName(l.kind, l.id)).join(" + "), memo: x.memo,
             }))]
             .sort((a, b) => b.d - a.d)
