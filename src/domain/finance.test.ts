@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   convertAtRates,
   investmentTradePnl,
+  rateAt,
   toSessionCurrency,
   transferDifference,
 } from "./finance";
@@ -28,5 +29,18 @@ describe("transaction-time FX calculations", () => {
   it("calculates investment P/L after removing deposits and adding withdrawals", () => {
     expect(investmentTradePnl(1_000, 1_250, 200, 50)).toBe(100);
     expect(investmentTradePnl(1_000, 1_000, 200, 200)).toBe(0);
+  });
+});
+
+describe("historical rate lookup", () => {
+  it("uses the latest rate effective on or before the transaction date", () => {
+    const history = [
+      { base: "KHR", rate: 4000, effectiveAt: 100 },
+      { base: "KHR", rate: 4100, effectiveAt: 200 },
+      { base: "KHR", rate: 4200, effectiveAt: 300 },
+    ];
+    expect(rateAt("KHR", 250, history, { KHR: 9999 })).toBe(4100);
+    expect(rateAt("KHR", 150, history, { KHR: 9999 })).toBe(4000);
+    expect(rateAt("KHR", 50, history, { KHR: 9999 })).toBe(9999);
   });
 });
