@@ -22,7 +22,7 @@ export default function HomeScreen() {
   const quick = useQuick();
   const s = data.settings;
   const txBase = (t: (typeof data.transactions)[number]) => amountAtBaseCurrency(
-    t.amount, t.currency, t.fxRate, t.date, s.base, data.exchangeRates, s.rates,
+    t.amount, t.currency, t.fxRate, t.date, s.base, data.exchangeRates, s.rates, t.amountBase, t.baseCurrency,
   );
 
   const history = useMemo(
