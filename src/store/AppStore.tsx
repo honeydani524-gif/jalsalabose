@@ -922,7 +922,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         throw new Error("Cash-out 금액 또는 수수료를 확인하세요.");
       if (input.legs.length === 0) throw new Error("도착지를 추가하세요.");
       const currentSessionTotals = casinoSessionTotals(
-        session.id, d.casinoBuyIns, d.casinoCashOuts,
+        session.id, d.casinoBuyIns, d.casinoCashOuts, session,
       );
       if (input.totalAmount > currentSessionTotals.open + 0.01)
         throw new Error("Cash-out 금액이 현재 미정산 칩보다 큽니다.");
@@ -991,7 +991,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!d) return { ok: false };
       const ses = d.casinoSessions.find((s) => s.id === id);
       if (!ses) return { ok: false, message: "세션을 찾을 수 없습니다." };
-      const open = casinoSessionTotals(id, d.casinoBuyIns, d.casinoCashOuts).open;
+      const open = casinoSessionTotals(id, d.casinoBuyIns, d.casinoCashOuts, ses).open;
       if (open < -0.01)
         return { ok: false, message: "Cash-out 금액이 Buy-in 칩 잔액을 초과했습니다. 거래 내역을 확인하세요." };
       if (open > 1e-6 && !force)
