@@ -424,6 +424,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const remove = useCallback(
     async (store: StoreName, id: string) => {
+      if (store === "transactions")
+        throw new Error("거래 삭제는 잔액 복구가 포함된 removeTransaction을 사용해야 합니다.");
       const d = ref.current;
       if (!d) return;
       const list = (d as unknown as Record<StoreName, { id: string }[]>)[store] ?? [];
