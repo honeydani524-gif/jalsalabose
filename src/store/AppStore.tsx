@@ -665,7 +665,17 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         memo: input.memo,
         createdAt: Date.now(),
       };
-      const oldSnapshotTxs = d.transactions.filter((tx) => tx.snapshotId === snap.id);
+      const oldSnapshotTxs = d.transactions.filter((tx) => {
+        if (tx.snapshotId === snap.id) return true;
+        if (tx.snapshotId || tx.type !== "transfer") return false;
+        const isSnapshotMemo =
+          tx.memo === `${input.date} 투자 입금` || tx.memo === `${input.date} 투자 출금`;
+        if (!isSnapshotMemo) return false;
+        const touchesInvestment =
+          (tx.from?.kind === "account" && tx.from.id === input.accountId) ||
+          (tx.legs ?? []).some((leg) => leg.kind === "account" && leg.id === input.accountId);
+        return touchesInvestment;
+      });
       let next: Data = {
         ...d,
         invSnapshots: existing
