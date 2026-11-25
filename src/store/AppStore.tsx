@@ -1226,8 +1226,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       // A single IndexedDB transaction clears and rewrites every store.
       // If any write fails, IndexedDB rolls the entire transaction back.
       await replaceAll(normalized);
-      const tables = { ...normalized };
-      delete tables.kv;
+      const tables = Object.fromEntries(
+        STORE_LIST.filter((store) => store !== "kv").map((store) => [store, normalized[store]]),
+      );
       const merged = { ...tables, settings } as unknown as Data;
       ref.current = merged;
       setData(merged);
