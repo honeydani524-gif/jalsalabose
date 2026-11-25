@@ -39,3 +39,14 @@ Use this checklist against the latest APK artifact produced by the GitHub Action
 - [ ] Confirm an upgrade installs over the previous signed build and preserves local IndexedDB data
 
 Do not mark the app release-ready until the automated checks and physical-device checks are complete.
+
+
+## Third-pass regression checks
+
+- [ ] Attempt a transaction with a non-finite amount/date through the store action; it must be rejected without changing balances or history
+- [ ] Attempt a balance edit or casino Buy-in/Cash-out with NaN/Infinity; it must be rejected without writing any rows
+- [ ] Attempt to calculate a transaction in an unsupported currency without a historical/configured FX rate; calculation must fail visibly rather than assume 1 USD = 1 unit
+- [ ] Attempt to restore a backup containing unsupported currency codes or unsupported base currency; restore must be rejected and existing data must remain intact
+- [ ] Apply a partial FX settings update; unspecified currency rates must remain unchanged
+- [ ] Export a backup and verify meta.counts.kv equals 1 and matches the single settings row in kv
+- [ ] Start a restore/reset/sample replacement while a balance save is active; the second operation must be rejected rather than interleave with the first
