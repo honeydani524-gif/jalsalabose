@@ -113,20 +113,30 @@ export async function putRows<T extends { id: string }>(
   });
 }
 
-/** Write rows across multiple object stores in one atomic transaction. */
-export async function putBatch(
+/** Apply puts and deletes across multiple object stores in one transaction. */
+export async function writeBatch(
   items: [StoreName, { id: string } ][],
+  deletes: [StoreName, string][] = [],
 ): Promise<void> {
-  if (items.length === 0) return;
+  if (items.length === 0 && deletes.length === 0) return;
   const db = await openDB();
   await new Promise<void>((resolve, reject) => {
-    const stores = [...new Set(items.map(([store]) => store))];
+    const stores = [...new Set([
+      ...items.map(([store]) => store),
+      ...deletes.map(([store]) => store),
+    ])];
     const tx = db.transaction(stores, "readwrite");
+    deletes.forEach(([store, id]) => tx.objectStore(store).delete(id));
     items.forEach(([store, row]) => tx.objectStore(store).put(row));
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error ?? new Error("일괄 저장 트랜잭션 실패"));
     tx.onabort = () => reject(tx.error ?? new Error("일괄 저장 트랜잭션이 취소되었습니다."));
   });
+}
+
+/** Write rows across multiple object stores in one atomic transaction. */
+export async function putBatch(items: [StoreName, { id: string } ][]): Promise<void> {
+  await writeBatch(items);
 }
 
 /** Replace every store atomically; a failed restore leaves the old database intact. */
