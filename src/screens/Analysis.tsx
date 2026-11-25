@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useStore } from "../store/AppStore";
-import { amountAtBaseCurrency } from "../domain/finance";
+import { amountAtBaseCurrency, netPayoutAfterUsdFee } from "../domain/finance";
 import { Badge, Bars, Btn, Card, CardTitle, Chip, Donut, Empty, Icon, Money, Row, Segmented, Spark } from "../ui/kit";
 import {
   fmtAmount,
@@ -293,7 +293,7 @@ export function AnalysisScreen() {
           <div className="mt-3 rounded-xl bg-[#fef4e6] px-3 py-2 font-mono text-[11.5px] text-ink/70">
             실제 지급 수익 합계{" "}
             <b>{fmtAmount(sum(data.propPayouts.map((x) => amountAtBaseCurrency(
-              Math.max(0, x.amount - (x.fee || 0) * (x.fxRate || 1)),
+              netPayoutAfterUsdFee(x.amount, x.fxRate || 1, x.fee || 0),
               x.currency, x.fxRate, x.receivedAt, s.base, data.exchangeRates, s.rates,
             ))), s.base)}</b> (수령 계좌에 반영됨)
           </div>
@@ -443,7 +443,7 @@ export function AIScreen() {
       });
       const paid = sum(data.propPayouts.filter((p) => p.receivedAt >= from).map((p) =>
         amountAtBaseCurrency(
-          Math.max(0, p.amount - (p.fee || 0) * (p.fxRate || 1)),
+          netPayoutAfterUsdFee(p.amount, p.fxRate || 1, p.fee || 0),
           p.currency, p.fxRate, p.receivedAt, s.base, data.exchangeRates, s.rates,
         ),
       ));
