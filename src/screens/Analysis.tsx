@@ -40,8 +40,8 @@ export function AnalysisScreen() {
   );
 
   const history = useMemo(
-    () => data.nwHistory.filter((p) => p.t >= from).map((p) => (p.value / (s.rates[p.base] ?? 1)) * (s.rates[s.base] ?? 1)),
-    [data.nwHistory, from, s],
+    () => data.nwHistory.filter((p) => p.t >= from).map((p) => amountAtBaseCurrency(p.value, p.base, 1, p.t, s.base, data.exchangeRates, s.rates, p.value, p.base)),
+    [data.nwHistory, data.exchangeRates, from, s],
   );
 
   const txs = useMemo(() => data.transactions.filter((t) => t.date >= from), [data.transactions, from]);
