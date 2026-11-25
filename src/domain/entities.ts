@@ -429,13 +429,13 @@ export function computeNetWorth(d: DataSlice): NwResult {
     .forEach((ses) => {
       const v = ongoingChipBase(ses.id, d.casinoBuyIns, d.casinoCashOuts, s);
       if (v <= 0) return;
-      const bi = d.casinoBuyIns.find((b) => b.sessionId === ses.id);
+      const totals = casinoSessionTotals(ses.id, d.casinoBuyIns, d.casinoCashOuts);
       excluded.push({
         id: `${ses.id}-chip`,
         group: "제외 · 카지노",
         label: `진행 중 세션 칩`,
-        currency: bi?.currency ?? s.base,
-        amount: round(bi ? bi.amount - d.casinoCashOuts.filter((c) => c.sessionId === ses.id).reduce((a, c) => a + c.totalAmount, 0) : 0, 6),
+        currency: totals.currency,
+        amount: totals.open,
         base: round(v, 6),
         included: false,
         reason: "미정산",
