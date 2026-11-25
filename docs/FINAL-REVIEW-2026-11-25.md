@@ -62,3 +62,10 @@ Before APK packaging was gated behind manual dispatch, an earlier workflow run [
 - Casino crypto Buy-in currently supports USDT only.
 - The repository is public and has no standard LICENSE file; source visibility and reuse rights should be considered separately.
 - PR #1 remains open and draft. Do not merge into `main` without explicit approval.
+
+
+## Follow-up integrity review
+
+A second pass found that asset deletion guards were incomplete: some screens checked only transaction source/account fields and did not cover transfer destination legs or related investment, prop, and casino records. The store now rejects deletion whenever a record references the account, cash location, crypto wallet, prop account, or casino. The UI surfaces the rejection rather than silently removing linked data.
+
+Additional physical QA: attempt to delete an account referenced only as a transfer destination; a cash location referenced by a casino Cash-out; a crypto wallet referenced by crypto assets, crypto transactions, or casino flows; a prop account with payout history; and a casino with session history. Every deletion must be blocked without changing data.
