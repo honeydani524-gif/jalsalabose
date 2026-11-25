@@ -38,6 +38,7 @@ import {
 import { convertAtRates, rateAt as historicalRateAt, toSessionCurrency } from "../domain/finance";
 import {
   computeNetWorth,
+  casinoSessionTotals,
   type Account,
   type Asset,
   type BuyIn,
@@ -769,39 +770,61 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }) => {
       const d = ref.current;
       if (!d) throw new Error("데이터가 준비되지 않았습니다.");
-      if (input.amount <= 0) throw new Error("금액은 0보다 커야 합니다.");
+      if (input.amount <= 0 || input.fee < 0) throw new Error("금액 또는 수수료를 확인하세요.");
 
       let sessionId = input.sessionId;
       const pers: Persist = [];
       let next: Data = d;
-
       if (!sessionId) {
         const open = next.casinoSessions.find(
           (s) => s.casinoId === input.casinoId && s.status === "ongoing",
         );
         if (open) sessionId = open.id;
       }
-      if (!sessionId) {
-        const ses: Session = {
+
+      let session = sessionId ? next.casinoSessions.find((s) => s.id === sessionId) : undefined;
+      if (sessionId && !session) throw new Error("카지노 세션을 찾을 수 없습니다.");
+      if (!session) {
+        const sessionFxRate = rateAtTx(d, input.currency, input.date);
+        session = {
           id: uid(),
           casinoId: input.casinoId,
           startedAt: input.date,
           status: "ongoing",
           currency: input.currency,
+          fxRate: sessionFxRate,
           memo: input.memo,
         };
-        sessionId = ses.id;
-        next = { ...next, casinoSessions: [...next.casinoSessions, ses] };
-        pers.push(["casinoSessions", ses]);
+        sessionId = session.id;
+        next = { ...next, casinoSessions: [...next.casinoSessions, session] };
+        pers.push(["casinoSessions", session]);
+      } else if (session.status !== "ongoing") {
+        throw new Error("종료된 세션에는 Buy-in을 추가할 수 없습니다.");
       }
 
+      const sourceRow = input.from.kind === "account"
+        ? d.accounts.find((a) => a.id === input.from.id)
+        : input.from.kind === "cash"
+          ? d.cashLocations.find((a) => a.id === input.from.id)
+          : d.cryptoWallets.find((a) => a.id === input.from.id);
+      if (!sourceRow) throw new Error("Buy-in 출발 자산을 찾을 수 없습니다.");
+      const sourceCurrency = input.from.kind === "crypto" ? "USD" : sourceRow.currency;
+      if (sourceCurrency !== input.currency)
+        throw new Error("Buy-in 금액 통화가 출발 자산 통화와 다릅니다.");
+
+      const fxRate = rateAtTx(d, input.currency, input.date);
+      const sessionFxRate =
+        session.fxRate ??
+        d.casinoBuyIns.find((b) => b.sessionId === sessionId)?.fxRate ??
+        rateAtTx(d, session.currency, session.startedAt);
       const bi: BuyIn = {
         id: uid(),
         sessionId: sessionId!,
         from: input.from,
         amount: round(input.amount, 6),
         currency: input.currency,
-        fxRate: rateOf(d.settings, input.currency),
+        fxRate,
+        sessionAmount: round(toSessionCurrency(input.amount, fxRate, sessionFxRate), 6),
         chipAmount: round(input.chipAmount, 6),
         fee: round(input.fee, 6),
         date: input.date,
@@ -810,13 +833,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       next = { ...next, casinoBuyIns: [...next.casinoBuyIns, bi] };
       pers.push(["casinoBuyIns", bi]);
 
-      // 출발 자산 차감 (칩은 순자산에 포함하지 않는다)
+      // Deduct from the source asset. Crypto Buy-ins are denominated in USD/USDT.
       if (input.from.kind === "crypto") {
         const symbol = input.symbol ?? "USDT";
         next = bumpCrypto(next, input.from.id, symbol, -(input.amount + input.fee), pers);
       } else {
-        assertBalance(next, input.from.kind, input.from.id, input.amount);
-        next = bumpRel(next, input.from.kind, input.from.id, -input.amount, pers);
+        assertBalance(next, input.from.kind, input.from.id, input.amount + input.fee);
+        next = bumpRel(next, input.from.kind, input.from.id, -(input.amount + input.fee), pers);
       }
 
       commit(recordHistory(next), pers);
@@ -838,11 +861,43 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }) => {
       const d = ref.current;
       if (!d) throw new Error("데이터가 준비되지 않았습니다.");
+      const session = d.casinoSessions.find((s) => s.id === input.sessionId);
+      if (!session) throw new Error("카지노 세션을 찾을 수 없습니다.");
+      if (session.status !== "ongoing") throw new Error("종료된 세션에는 Cash-out을 추가할 수 없습니다.");
+      if (input.currency !== session.currency)
+        throw new Error("Cash-out 입력 통화는 세션 기준 통화와 같아야 합니다.");
+      if (input.totalAmount <= 0 || input.fee < 0 || input.fee > input.totalAmount)
+        throw new Error("Cash-out 금액 또는 수수료를 확인하세요.");
       if (input.legs.length === 0) throw new Error("도착지를 추가하세요.");
-      const sumLegs = input.legs.reduce((s, l) => s + l.amount, 0);
-      if (Math.abs(sumLegs - (input.totalAmount - input.fee)) > 1e-6)
+
+      const sessionFxRate =
+        session.fxRate ??
+        d.casinoBuyIns.find((b) => b.sessionId === session.id)?.fxRate ??
+        rateAtTx(d, session.currency, session.startedAt);
+      const cashOutFxRate = rateAtTx(d, input.currency, input.date);
+      const enrichedLegs = input.legs.map((leg) => {
+        if (leg.amount <= 0) throw new Error("도착 금액은 0보다 커야 합니다.");
+        const destination = leg.kind === "account"
+          ? d.accounts.find((a) => a.id === leg.id)
+          : leg.kind === "cash"
+            ? d.cashLocations.find((a) => a.id === leg.id)
+            : d.cryptoWallets.find((a) => a.id === leg.id);
+        if (!destination) throw new Error("Cash-out 도착 자산을 찾을 수 없습니다.");
+        const currency = leg.kind === "crypto" ? "USD" : destination.currency;
+        const fxRate = rateAtTx(d, currency, input.date);
+        return {
+          ...leg,
+          currency,
+          fxRate,
+          amount: round(leg.amount, 6),
+          amountSession: round(toSessionCurrency(leg.amount, fxRate, sessionFxRate), 6),
+        };
+      });
+      const netSessionAmount = input.totalAmount - input.fee;
+      const destinationSessionAmount = enrichedLegs.reduce((sum, leg) => sum + (leg.amountSession ?? 0), 0);
+      if (Math.abs(netSessionAmount - destinationSessionAmount) > 0.01)
         throw new Error(
-          `도착 합계(${sumLegs})가 실수령액(${input.totalAmount - input.fee})과 다릅니다.`,
+          `도착지 합계(${round(destinationSessionAmount, 6)} ${session.currency})가 실수령액(${round(netSessionAmount, 6)} ${session.currency})과 다릅니다.`,
         );
 
       const co: CashOut = {
@@ -850,17 +905,19 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         sessionId: input.sessionId,
         totalAmount: round(input.totalAmount, 6),
         currency: input.currency,
-        fxRate: rateOf(d.settings, input.currency),
+        fxRate: cashOutFxRate,
+        sessionAmount: round(toSessionCurrency(input.totalAmount, cashOutFxRate, sessionFxRate), 6),
         fee: round(input.fee, 6),
         date: input.date,
         memo: input.memo,
-        legs: input.legs.map((l) => ({ ...l, amount: round(l.amount, 6) })),
+        legs: enrichedLegs,
       };
       const pers: Persist = [["casinoCashOuts", co]];
       let next: Data = { ...d, casinoCashOuts: [...d.casinoCashOuts, co] };
-      input.legs.forEach((l) => {
-        if (l.kind === "crypto") next = bumpCrypto(next, l.id, input.symbol ?? "USDT", l.amount, pers);
-        else next = bumpRel(next, l.kind, l.id, l.amount, pers);
+      enrichedLegs.forEach((leg) => {
+        if (leg.kind === "crypto")
+          next = bumpCrypto(next, leg.id, input.symbol ?? "USDT", leg.amount, pers);
+        else next = bumpRel(next, leg.kind, leg.id, leg.amount, pers);
       });
       commit(recordHistory(next), pers);
     },
