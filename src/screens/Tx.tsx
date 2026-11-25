@@ -283,7 +283,7 @@ export default function TxScreen() {
               </div>
             )}
             <p className="font-mono text-[11.5px] text-muted">
-              원본 통화 {open.currency} · 당시 환율 {open.fxRate} · 기준 통화 {data.settings.base} 환산 {fmtAmount(open.amountBase, data.settings.base)}
+              원본 통화 {open.currency} · 당시 환율 {open.fxRate} · 기준 통화 {data.settings.base} 환산 {fmtAmount(txBase(open), data.settings.base)}
               <br />
               이후 환율을 바꿔도 이 값은 변하지 않습니다.
             </p>
