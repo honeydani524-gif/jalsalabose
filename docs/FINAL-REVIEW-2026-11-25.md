@@ -43,6 +43,10 @@ The latest code, package metadata, and CI configuration verification completed s
 
 The tests cover transaction-time FX display across base-currency changes, backdated casino Buy-ins, balance reversals for deleted transactions, and external prop payout reversal. This automated verification does not certify Android installation or physical-device behavior.
 
+### Historical artifact note
+
+Before APK packaging was gated behind manual dispatch, an earlier workflow run [45592746439](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45592746439) created debug artifact `jalsalabose-android-debug` (artifact ID `15012096309`). It was not downloaded or distributed and is not a release candidate; it expires on 2026-12-09. Current push/PR runs skip APK packaging.
+
 ## Remaining checks before release
 
 1. Perform physical Android testing: first launch, persistence after restart, orientation/process recreation, and update installation.
