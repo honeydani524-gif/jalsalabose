@@ -98,12 +98,12 @@ function AccountForm({ id, onClose }: { id?: string; onClose: () => void }) {
             <Btn
               variant="danger"
               onClick={async () => {
-                if (data.transactions.some((t) => t.accountId === ex.id)) {
-                  setErr("거래가 있는 계좌는 삭제할 수 없습니다. ‘보관’으로 숨기세요.");
-                  return;
+                try {
+                  await remove("accounts", ex.id);
+                  onClose();
+                } catch (e) {
+                  setErr((e as Error).message);
                 }
-                await remove("accounts", ex.id);
-                onClose();
               }}
             >
               삭제
@@ -341,16 +341,12 @@ function BalanceDetail({ kind, id, onClose }: { kind: "account" | "cash"; id: st
           <Btn
             variant="danger"
             onClick={async () => {
-              const used =
-                kind === "account"
-                  ? data.transactions.some((t) => t.accountId === id || t.from?.id === id)
-                  : data.transactions.some((t) => t.from?.id === id || t.legs?.some((l) => l.id === id));
-              if (used) {
-                setErr("거래가 존재하여 삭제할 수 없습니다.");
-                return;
+              try {
+                await remove(kind === "account" ? "accounts" : "cashLocations", id);
+                onClose();
+              } catch (e) {
+                setErr((e as Error).message);
               }
-              await remove(kind === "account" ? "accounts" : "cashLocations", id);
-              onClose();
             }}
           >
             삭제
