@@ -35,7 +35,7 @@ import {
   toBase,
   type Settings,
 } from "../domain/calc";
-import { convertAtRates, toSessionCurrency } from "../domain/finance";
+import { convertAtRates, rateAt as historicalRateAt, toSessionCurrency } from "../domain/finance";
 import {
   computeNetWorth,
   type Account,
@@ -486,6 +486,14 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     return row;
   };
 
+  const rateAtTx = (d: Data, currency: string, timestamp: number) =>
+    historicalRateAt(currency, timestamp, d.exchangeRates, d.settings.rates);
+  const toBaseAtTx = (d: Data, amount: number, currency: string, timestamp: number) =>
+    round(
+      (amount / rateAtTx(d, currency, timestamp)) * rateAtTx(d, d.settings.base, timestamp),
+      6,
+    );
+
   /* ── 거래 (수입 · 지출 · 이체 · 조정) ── */
   const applyTx = useCallback(
     async (input: TxInput) => {
@@ -516,29 +524,29 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           if (input.from!.kind === leg.kind && input.from!.id === leg.id)
             throw new Error("출발 자산과 도착 자산은 달라야 합니다.");
           const currency = destination.currency;
-          const fxRate = rateOf(d.settings, currency);
+          const fxRate = rateAtTx(d, currency, input.date);
           return {
             ...leg,
             currency,
             fxRate,
-            amountBase: round(toBase(leg.amount, currency, d.settings), 6),
+            amountBase: toBaseAtTx(d, leg.amount, currency, input.date),
           };
         });
-        const sourceBase = toBase(input.amount, input.currency, d.settings);
-        const destinationBase = normalizedLegs.reduce((sum, leg) => sum + (leg.amountBase ?? 0), 0);
-        if (Math.abs(sourceBase - destinationBase) > 0.01)
+        const sourceBase = input.amount / rateAtTx(d, input.currency, input.date);
+        const destinationBase = normalizedLegs.reduce((sum, leg) => sum + leg.amount / (leg.fxRate ?? 1), 0);
+        if (Math.abs(sourceBase - destinationBase) > 0.00001)
           throw new Error(`환산 기준 도착 합계(${round(destinationBase, 6)})가 출발 금액(${round(sourceBase, 6)})과 다릅니다.`);
         assertBalance(d, input.from.kind, input.from.id, input.amount);
       }
 
-      const fxRate = rateOf(d.settings, input.currency);
+      const fxRate = rateAtTx(d, input.currency, input.date);
       const tx: Tx = {
         id: uid(),
         type: input.type,
         amount: round(input.amount, 6),
         currency: input.currency,
         fxRate,
-        amountBase: round(toBase(input.amount, input.currency, d.settings), 6),
+        amountBase: toBaseAtTx(d, input.amount, input.currency, input.date),
         date: input.date,
         accountId: input.accountId,
         from: input.from,
