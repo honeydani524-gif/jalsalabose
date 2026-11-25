@@ -1150,11 +1150,11 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         throw new Error("백업의 최상위 구조가 올바르지 않습니다.");
       const parsed = parsedValue as Record<string, unknown>;
 
-      const meta = parsed.meta as { app?: string; schemaVersion?: number } | undefined;
+      const meta = parsed.meta as { app?: string; schemaVersion?: number; backupVersion?: number } | undefined;
       if (!meta || meta.app !== "JalSalAboSe") throw new Error("잘살아보세 백업 파일이 아닙니다.");
       if (meta.schemaVersion !== 1)
         throw new Error("지원하지 않는 백업 데이터 버전입니다. 최신 앱에서 다시 내보내세요.");
-      if (parsed.meta && isRecord(parsed.meta) && parsed.meta.backupVersion !== 1)
+      if (meta.backupVersion !== 1)
         throw new Error("지원하지 않는 백업 파일 버전입니다.");
 
       const isRecord = (value: unknown): value is Record<string, unknown> =>
