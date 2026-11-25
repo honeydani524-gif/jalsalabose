@@ -31,17 +31,16 @@
 
 ## Latest automated verification
 
-The latest code, package metadata, and CI configuration verification completed successfully at commit `e5ebab0f5539b276e7a5a72e15d99bc956f700d2`.
+The latest code, package metadata, CI configuration, linked-asset deletion safeguards, crypto valuation correction, and net prop payout reporting verification completed successfully at commit `46892d7e72bcbaea94085ed41c83317fe831a5a9`.
 
-- GitHub Actions push run: [45596036795](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45596036795)
-- GitHub Actions pull request run: [45596046143](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45596046143)
+- GitHub Actions verification run: [45610307847](https://github.com/honeydani524-gif/jalsalabose/actions/runs/45610307847)
 - `npm ci`: passed
 - Financial regression tests: passed
 - TypeScript check: passed
 - Vite production build: passed
 - Android APK job: skipped by design; no APK artifact was created by these runs
 
-The tests cover transaction-time FX display across base-currency changes, backdated casino Buy-ins, balance reversals for deleted transactions, and external prop payout reversal. This automated verification does not certify Android installation or physical-device behavior.
+The tests cover transaction-time FX display across base-currency changes, backdated casino Buy-ins, balance reversals for deleted transactions, external prop payout reversal, and crypto wallet native-USD versus selected-base valuation. This automated verification does not certify Android installation or physical-device behavior.
 
 ### Historical artifact note
 
