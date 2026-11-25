@@ -1,0 +1,19 @@
+# Node / Vite
+node_modules/
+dist/
+
+# Capacitor / Android local build state
+android/local.properties
+android/.gradle/
+android/**/build/
+android/.idea/
+android/captures/
+android/.externalNativeBuild/
+android/.cxx/
+*.jks
+*.keystore
+
+# Local environment
+.env
+.env.*
+!.env.example
