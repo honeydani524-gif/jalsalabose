@@ -261,12 +261,14 @@ export function casinoSessionTotals(
   sessionId: string,
   buyIns: BuyIn[],
   cashOuts: CashOut[],
+  session?: Pick<Session, "currency" | "fxRate">,
 ): { currency: string; buyIn: number; cashOut: number; open: number } {
   const sessionBuyIns = buyIns.filter((b) => b.sessionId === sessionId).sort((a, b) => a.date - b.date);
   const sessionCashOuts = cashOuts.filter((c) => c.sessionId === sessionId);
   const first = sessionBuyIns[0];
-  const currency = first?.currency ?? "USD";
-  const sessionFxRate = first?.fxRate ?? 1;
+  // The persisted session is authoritative: a later Buy-in may be entered with an earlier date.
+  const currency = session?.currency ?? first?.currency ?? "USD";
+  const sessionFxRate = session?.fxRate ?? first?.fxRate ?? 1;
   const buyIn = sessionBuyIns.reduce(
     (sum, b) => sum + (typeof b.sessionAmount === "number"
       ? b.sessionAmount
@@ -303,8 +305,9 @@ export function ongoingChipBase(
   buyIns: BuyIn[],
   cashOuts: CashOut[],
   settings: Settings,
+  session?: Pick<Session, "currency" | "fxRate">,
 ): number {
-  const totals = casinoSessionTotals(sessionId, buyIns, cashOuts);
+  const totals = casinoSessionTotals(sessionId, buyIns, cashOuts, session);
   return round(toBase(Math.max(0, totals.open), totals.currency, settings), 6);
 }
 
@@ -446,9 +449,9 @@ export function computeNetWorth(d: DataSlice): NwResult {
   d.casinoSessions
     .filter((x) => x.status === "ongoing")
     .forEach((ses) => {
-      const v = ongoingChipBase(ses.id, d.casinoBuyIns, d.casinoCashOuts, s);
+      const v = ongoingChipBase(ses.id, d.casinoBuyIns, d.casinoCashOuts, s, ses);
       if (v <= 0) return;
-      const totals = casinoSessionTotals(ses.id, d.casinoBuyIns, d.casinoCashOuts);
+      const totals = casinoSessionTotals(ses.id, d.casinoBuyIns, d.casinoCashOuts, ses);
       excluded.push({
         id: `${ses.id}-chip`,
         group: "제외 · 카지노",
