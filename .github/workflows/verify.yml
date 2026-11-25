@@ -43,7 +43,8 @@ jobs:
         run: npm run build
 
   android-apk:
-    if: github.event_name == 'workflow_dispatch' && inputs.build_apk == true
+    # Build APK automatically when the dedicated testing branch is updated; keep manual dispatch support too.
+    if: (github.event_name == 'workflow_dispatch' && inputs.build_apk == true) || (github.event_name == 'push' && github.ref == 'refs/heads/fix/phase-2-financial-corrections')
     needs: verify
     runs-on: ubuntu-latest
     steps:
