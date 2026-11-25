@@ -106,10 +106,15 @@ export async function putRows<T extends { id: string }>(
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(store, "readwrite");
     const os = tx.objectStore(store);
-    rows.forEach((r) => os.put(r));
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error ?? new Error("일괄 저장 실패"));
     tx.onabort = () => reject(tx.error ?? new Error("일괄 저장이 취소되었습니다."));
+    try {
+      rows.forEach((r) => os.put(r));
+    } catch (error) {
+      try { tx.abort(); } catch { /* transaction may already be inactive */ }
+      reject(error);
+    }
   });
 }
 
@@ -126,11 +131,16 @@ export async function writeBatch(
       ...deletes.map(([store]) => store),
     ])];
     const tx = db.transaction(stores, "readwrite");
-    deletes.forEach(([store, id]) => tx.objectStore(store).delete(id));
-    items.forEach(([store, row]) => tx.objectStore(store).put(row));
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error ?? new Error("일괄 저장 트랜잭션 실패"));
     tx.onabort = () => reject(tx.error ?? new Error("일괄 저장 트랜잭션이 취소되었습니다."));
+    try {
+      deletes.forEach(([store, id]) => tx.objectStore(store).delete(id));
+      items.forEach(([store, row]) => tx.objectStore(store).put(row));
+    } catch (error) {
+      try { tx.abort(); } catch { /* transaction may already be inactive */ }
+      reject(error);
+    }
   });
 }
 
@@ -146,14 +156,19 @@ export async function replaceAll(
   const db = await openDB();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction([...STORE_LIST], "readwrite");
-    STORE_LIST.forEach((store) => {
-      const objectStore = tx.objectStore(store);
-      objectStore.clear();
-      (rowsByStore[store] ?? []).forEach((row) => objectStore.put(row));
-    });
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error ?? new Error("전체 데이터 교체 실패"));
     tx.onabort = () => reject(tx.error ?? new Error("전체 데이터 교체가 취소되었습니다."));
+    try {
+      STORE_LIST.forEach((store) => {
+        const objectStore = tx.objectStore(store);
+        objectStore.clear();
+        (rowsByStore[store] ?? []).forEach((row) => objectStore.put(row));
+      });
+    } catch (error) {
+      try { tx.abort(); } catch { /* transaction may already be inactive */ }
+      reject(error);
+    }
   });
 }
 
