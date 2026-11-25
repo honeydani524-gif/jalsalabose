@@ -56,3 +56,31 @@ describe("casino session currency accounting", () => {
     });
   });
 });
+
+
+describe("casino session uses its persisted first-buy-in currency", () => {
+  it("does not change session currency when a later Buy-in is backdated", () => {
+    const session = { currency: "KHR", fxRate: 4000 };
+    const buyIns = [
+      {
+        id: "original", sessionId: "s2", from: { kind: "account" as const, id: "a1" },
+        amount: 100, currency: "USD", fxRate: 1, sessionAmount: 400000,
+        chipAmount: 100, chipSessionAmount: 400000, fee: 0, date: 200,
+      },
+      {
+        id: "backdated", sessionId: "s2", from: { kind: "account" as const, id: "a2" },
+        amount: 140000, currency: "KRW", fxRate: 1400, sessionAmount: 400000,
+        chipAmount: 140000, chipSessionAmount: 400000, fee: 0, date: 100,
+      },
+    ];
+    const cashOuts = [
+      {
+        id: "out", sessionId: "s2", totalAmount: 200000, currency: "KHR",
+        fxRate: 4000, fee: 0, date: 300, legs: [],
+      },
+    ];
+    const totals = casinoSessionTotals("s2", buyIns, cashOuts, session);
+    expect(totals.currency).toBe("KHR");
+    expect(totals.open).toBe(600000);
+  });
+});
