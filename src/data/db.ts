@@ -63,9 +63,30 @@ async function run<T>(
   const db = await openDB();
   return new Promise<T>((resolve, reject) => {
     const tx = db.transaction(store, mode);
-    const req = fn(tx.objectStore(store));
-    req.onsuccess = () => resolve(req.result as T);
-    req.onerror = () => reject(req.error ?? new Error(`${store} 작업 실패`));
+    let result: T;
+    let settled = false;
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+    let req: IDBRequest;
+    try {
+      req = fn(tx.objectStore(store));
+    } catch (error) {
+      try { tx.abort(); } catch { /* transaction may already be inactive */ }
+      fail(error);
+      return;
+    }
+    req.onsuccess = () => { result = req.result as T; };
+    req.onerror = () => fail(req.error ?? new Error(`${store} 작업 실패`));
+    tx.oncomplete = () => {
+      if (settled) return;
+      settled = true;
+      resolve(result!);
+    };
+    tx.onerror = () => fail(tx.error ?? new Error(`${store} 트랜잭션 실패`));
+    tx.onabort = () => fail(tx.error ?? new Error(`${store} 트랜잭션이 취소되었습니다.`));
   });
 }
 
@@ -88,6 +109,41 @@ export async function putRows<T extends { id: string }>(
     rows.forEach((r) => os.put(r));
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error ?? new Error("일괄 저장 실패"));
+    tx.onabort = () => reject(tx.error ?? new Error("일괄 저장이 취소되었습니다."));
+  });
+}
+
+/** Write rows across multiple object stores in one atomic transaction. */
+export async function putBatch(
+  items: [StoreName, { id: string } ][],
+): Promise<void> {
+  if (items.length === 0) return;
+  const db = await openDB();
+  await new Promise<void>((resolve, reject) => {
+    const stores = [...new Set(items.map(([store]) => store))];
+    const tx = db.transaction(stores, "readwrite");
+    items.forEach(([store, row]) => tx.objectStore(store).put(row));
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error("일괄 저장 트랜잭션 실패"));
+    tx.onabort = () => reject(tx.error ?? new Error("일괄 저장 트랜잭션이 취소되었습니다."));
+  });
+}
+
+/** Replace every store atomically; a failed restore leaves the old database intact. */
+export async function replaceAll(
+  rowsByStore: Record<StoreName, { id: string }[]>,
+): Promise<void> {
+  const db = await openDB();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction([...STORE_LIST], "readwrite");
+    STORE_LIST.forEach((store) => {
+      const objectStore = tx.objectStore(store);
+      objectStore.clear();
+      (rowsByStore[store] ?? []).forEach((row) => objectStore.put(row));
+    });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error("전체 데이터 교체 실패"));
+    tx.onabort = () => reject(tx.error ?? new Error("전체 데이터 교체가 취소되었습니다."));
   });
 }
 
@@ -105,7 +161,8 @@ export async function clearAll(): Promise<void> {
     const tx = db.transaction(STORE_LIST as unknown as string[], "readwrite");
     STORE_LIST.forEach((s) => tx.objectStore(s).clear());
     tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
+    tx.onerror = () => reject(tx.error ?? new Error("전체 삭제 실패"));
+    tx.onabort = () => reject(tx.error ?? new Error("전체 삭제가 취소되었습니다."));
   });
 }
 
