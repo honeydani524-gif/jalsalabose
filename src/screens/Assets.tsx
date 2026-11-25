@@ -929,7 +929,7 @@ function WalletForm({ id, onClose }: { id?: string; onClose: () => void }) {
       footer={
         <div className="flex gap-2">
           {ex && (
-            <Btn variant="danger" onClick={async () => { await remove("cryptoWallets", ex.id); onClose(); }}>
+            <Btn variant="danger" onClick={async () => { try { await remove("cryptoWallets", ex.id); onClose(); } catch (e) { window.alert((e as Error).message); } }}>
               삭제
             </Btn>
           )}
@@ -999,7 +999,7 @@ function PropForm({ id, onClose }: { id?: string; onClose: () => void }) {
       footer={
         <div className="flex gap-2">
           {ex && (
-            <Btn variant="danger" onClick={async () => { await remove("propAccounts", ex.id); onClose(); }}>
+            <Btn variant="danger" onClick={async () => { try { await remove("propAccounts", ex.id); onClose(); } catch (e) { window.alert((e as Error).message); } }}>
               삭제
             </Btn>
           )}
