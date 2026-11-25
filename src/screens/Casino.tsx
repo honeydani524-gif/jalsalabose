@@ -505,7 +505,7 @@ export default function CasinoScreen() {
           ) : (
             <Card pad={false} className="overflow-hidden p-4 md:p-5">
               {[...data.casinoSessions].sort((a, b) => b.startedAt - a.startedAt).map((s) => {
-                const totals = casinoSessionTotals(s.id, data.casinoBuyIns, data.casinoCashOuts);
+                const totals = casinoSessionTotals(s.id, data.casinoBuyIns, data.casinoCashOuts, s);
                 const bi = totals.buyIn;
                 const co = totals.cashOut;
                 return (
