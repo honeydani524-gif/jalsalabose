@@ -68,7 +68,15 @@ The workflow must pass on the final branch head before this phase is considered 
 
 ## Not yet verified / next phase
 
-- No Android Capacitor project or APK is produced by this phase.
+- Android Capacitor project and CI debug APK build are now implemented in the follow-up Android packaging work.
 - No browser manual QA or physical Android device test has been performed.
 - IndexedDB restore behavior is protected by a single database transaction, but a real-browser failure-injection test is still desirable.
-- Android packaging and APK installation remain the next major milestone.
+- Physical Android device installation, lifecycle, file backup/restore, and release-signing checks remain outstanding.
+
+
+## Final review follow-up — 2026-11-25
+
+- CI verification now runs with read-only repository permissions; generated Android files are synchronized in the runner and are not auto-committed.
+- Crypto-funded casino Buy-ins are restricted to USDT until token-quantity valuation can be recorded with a transaction-time market price. The USD amount must not be subtracted as BTC/ETH/SOL units.
+- Prop payout accounting uses the historical payout-date FX rate and credits the payout net of the USD-denominated fee.
+- The workflow verifies tests, TypeScript, the production web bundle, and an Android debug APK. A physical Android device test and persistent release signing remain manual release checks.
